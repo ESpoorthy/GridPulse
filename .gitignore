@@ -218,3 +218,29 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# GridPulse local datasets and generated ML artefacts (never commit raw data)
+data/raw/
+data/processed/
+artifacts/
+models/
+mlruns/
+reports/generated/
+*.joblib
+*.pkl
+*.pickle
+*.parquet
+*.feather
+
+# Frontend/build output
+node_modules/
+.next/
+out/
+dist/
+coverage/
+
+# Local environment/configuration
+.env
+.env.*
+!.env.example
+.DS_Store
