@@ -64,17 +64,16 @@ No performance numbers are pre-claimed. A model will only be described as an imp
 
 This stack is planned, not yet an implemented or deployed system.
 
-## Repository setup
-
-The application code is not implemented yet. The following steps are the intended first setup sequence.
+## Dataset setup and validation
 
 1. Create and activate a Python virtual environment.
-2. Install the backend dependencies after `backend/requirements.txt` is added.
-3. Download the source data from the [official UCI dataset page](https://archive.ics.uci.edu/dataset/235/individualhouseholdelectricpowerconsumption).
-4. Put the extracted `household_power_consumption.txt` file at `data/raw/household_power_consumption.txt`.
-5. Run the data-validation and training commands once the scripts are implemented; their exact commands will be documented with the implementation.
+2. Install the current data/ML and test dependencies with `python -m pip install -r requirements.txt`.
+3. Download and extract the source file from the [official UCI dataset page](https://archive.ics.uci.edu/dataset/235/individualhouseholdelectricpowerconsumption).
+4. Place `household_power_consumption.txt` at `data/raw/household_power_consumption.txt`.
+5. Run `python scripts/validate_data.py` to create a local JSON quality report and eligible hourly series.
+6. Run `pytest -q tests/test_validate_data.py` to test the validator.
 
-Raw data, processed data, model files and experiment runs should remain outside Git. Do not add secrets or private credentials to the repository.
+The actual source-file scan has not yet been recorded in this repository. Review the generated report before training. Raw data, processed data, model files and experiment runs stay outside Git; never add secrets or private credentials.
 
 ## Scope and limitations
 
@@ -88,7 +87,8 @@ Raw data, processed data, model files and experiment runs should remain outside 
 
 - [x] Create repository and initial planning documents.
 - [x] Select a primary public dataset and document its limitations.
-- [ ] Validate source data and implement hourly aggregation.
+- [x] Document primary dataset and add a chunked validator with tests.
+- [ ] Run the validator against the downloaded original UCI file and review its report.
 - [ ] Build baselines and compare ML models with chronological evaluation.
 - [ ] Implement validation-calibrated anomaly detection.
 - [ ] Finalise UI/UX design and API contract.
