@@ -39,6 +39,7 @@ GridPulse/
 ├── PRD.md
 ├── ML_PLAN.md
 ├── .gitignore
+├── requirements.txt
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   └── DATASET.md
