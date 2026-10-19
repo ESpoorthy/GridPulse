@@ -74,6 +74,23 @@ The validation script should produce a summary before training:
 
 For hourly means, begin with a configurable coverage threshold of at least 45 valid minute-level target observations per hour. Document the threshold and test its effect; do not silently treat an hour with only a few measurements as complete.
 
+## Local validation tooling
+
+The repository includes a chunked validator at `scripts/validate_data.py`. It checks the expected schema, source row count, timestamp parsing/order, duplicate timestamps, numeric missingness and parse failures, active-power range signals, and hourly coverage. It writes:
+
+- `reports/generated/dataset_validation.json` — local data-quality report.
+- `data/processed/hourly_power.csv` — hourly means with at least 45 valid target readings by default.
+
+Run it from the repository root after installing dependencies and downloading the file:
+
+```bash
+python -m pip install -r requirements.txt
+python scripts/validate_data.py
+pytest -q tests/test_validate_data.py
+```
+
+The published row count is used as a warning/check, not as silent proof of integrity. Missing measurements are expected in this dataset and are reported, not imputed. The validator and aggregation tests use a small synthetic fixture; the complete original UCI file must still be scanned locally before model training, and its generated report should be reviewed. Generated data and reports are ignored by Git.
+
 ## 5. License and attribution
 
 The UCI dataset is licensed under CC BY 4.0. Preserve attribution in the README and final report:
