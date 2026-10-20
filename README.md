@@ -64,16 +64,53 @@ No performance numbers are pre-claimed. A model will only be described as an imp
 
 This stack is planned, not yet an implemented or deployed system.
 
-## Dataset setup and validation
+## Quick Start with Real Data
 
-1. Create and activate a Python virtual environment.
-2. Install the current data/ML and test dependencies with `python -m pip install -r requirements.txt`.
-3. Download and extract the source file from the [official UCI dataset page](https://archive.ics.uci.edu/dataset/235/individualhouseholdelectricpowerconsumption).
-4. Place `household_power_consumption.txt` at `data/raw/household_power_consumption.txt`.
-5. Run `python scripts/validate_data.py` to create a local JSON quality report and eligible hourly series.
-6. Run `pytest -q tests/test_validate_data.py` to test the validator.
+GridPulse now supports automatic download and validation of the UCI dataset:
 
-The actual source-file scan has not yet been recorded in this repository. Review the generated report before training. Raw data, processed data, model files and experiment runs stay outside Git; never add secrets or private credentials.
+```bash
+# 1. Create and activate a Python virtual environment
+python -m venv venv
+# Windows:
+venv\Scripts\activate
+# Linux/Mac:
+source venv/bin/activate
+
+# 2. Install dependencies
+python -m pip install -r requirements.txt
+
+# 3. Run the complete real-data integration demo
+python examples/real_data_demo.py
+```
+
+This will:
+- Download the UCI dataset (~20MB) from the official source
+- Validate the raw data and aggregate to hourly means
+- Build leakage-safe features (calendar, lag, rolling)
+- Split chronologically into train/validation/test sets
+- Train baseline and ML models
+- Evaluate on the test set and save results
+
+**Manual validation (alternative):**
+
+If you prefer to download the dataset manually or inspect the validation separately:
+
+1. Download `household_power_consumption.txt` from the [official UCI page](https://archive.ics.uci.edu/dataset/235/individualhouseholdelectricpowerconsumption)
+2. Place it at `data/raw/household_power_consumption.txt`
+3. Run `python scripts/validate_data.py` to validate and aggregate
+4. Check `reports/generated/dataset_validation.json` for quality metrics
+
+**Run tests:**
+
+```bash
+# Run all tests (109 tests covering features, baselines, evaluation, data loading)
+python -m pytest tests/ -v
+
+# Run only data integration tests
+python -m pytest tests/test_data_loader.py -v
+```
+
+Raw data, processed data, and model artifacts are git-ignored and stay local only.
 
 ## Scope and limitations
 
@@ -88,12 +125,15 @@ The actual source-file scan has not yet been recorded in this repository. Review
 - [x] Create repository and initial planning documents.
 - [x] Select a primary public dataset and document its limitations.
 - [x] Document primary dataset and add a chunked validator with tests.
-- [ ] Run the validator against the downloaded original UCI file and review its report.
-- [ ] Build baselines and compare ML models with chronological evaluation.
+- [x] Implement Milestone 1A: Leakage-safe feature engineering (calendar, lag, rolling features).
+- [x] Implement Milestone 1B: Baseline models (persistence, seasonal-naive) and evaluation framework.
+- [x] Implement real-data integration: download, validation, and pipeline orchestration.
+- [x] Add comprehensive test coverage (109 tests passing).
+- [ ] Run end-to-end experiments on real UCI data and document actual performance.
 - [ ] Implement validation-calibrated anomaly detection.
 - [ ] Finalise UI/UX design and API contract.
 - [ ] Implement frontend and backend integration.
-- [ ] Add automated tests, measured results and deployment documentation.
+- [ ] Add deployment documentation and production readiness checks.
 
 ## License
 

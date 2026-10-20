@@ -18,6 +18,8 @@ lib/
 lib64/
 parts/
 sdist/
+# Don't ignore frontend/lib/ (source code)
+!frontend/lib/
 var/
 wheels/
 share/python-wheels/
@@ -231,6 +233,8 @@ reports/generated/
 *.pickle
 *.parquet
 *.feather
+# Don't ignore frontend/app/models/ page (source code)
+!frontend/app/models/
 
 # Frontend/build output
 node_modules/

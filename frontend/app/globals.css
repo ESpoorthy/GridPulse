@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+:root {
+  /* GridPulse Dark Theme - from Figma */
+  --gp-bg-primary: #0c1215;
+  --gp-bg-secondary: #10181b;
+  --gp-bg-card: #121d21;
+  --gp-border: #29383d;
+  --gp-text-primary: #e8f0ec;
+  --gp-text-secondary: #93a7ab;
+  --gp-text-muted: #6b7f84;
+  --gp-accent-green: #bcf58a;
+  --gp-accent-teal: #9cdccb;
+  --gp-accent-purple: #b9adff;
+  --gp-accent-orange: #f3bd75;
+  
+  --background: #0c1215;
+  --foreground: #e8f0ec;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+body {
+  background: var(--gp-bg-primary);
+  color: var(--gp-text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
