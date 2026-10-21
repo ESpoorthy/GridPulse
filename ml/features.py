@@ -209,6 +209,68 @@ def build_features(
     return result
 
 
+def build_feature_row(
+    timestamp: pd.Timestamp,
+    target_history: list[float] | np.ndarray,
+    *,
+    lag_hours: list[int] | None = None,
+    rolling_windows: list[int] | None = None,
+) -> pd.DataFrame:
+    """Build one future feature row from prior targets only."""
+    values = np.asarray(target_history, dtype=float).reshape(1, -1)
+    return build_feature_rows(
+        pd.DatetimeIndex([pd.Timestamp(timestamp)]), values,
+        lag_hours=lag_hours, rolling_windows=rolling_windows,
+    )
+
+
+def build_feature_rows(
+    timestamps: pd.DatetimeIndex,
+    target_histories: np.ndarray,
+    *,
+    lag_hours: list[int] | None = None,
+    rolling_windows: list[int] | None = None,
+) -> pd.DataFrame:
+    """Vectorized future feature rows from equally sized prior target windows."""
+    if lag_hours is None:
+        lag_hours = [1, 2, 3, 24, 48, 168]
+    if rolling_windows is None:
+        rolling_windows = [3, 24, 168]
+    timestamps = pd.DatetimeIndex(timestamps)
+    values = np.asarray(target_histories, dtype=float)
+    if values.ndim != 2 or len(values) != len(timestamps):
+        raise ValueError("target_histories must be a 2D array with one row per timestamp")
+    ts = pd.Series(timestamps)
+    hour, day = ts.dt.hour.to_numpy(), ts.dt.dayofweek.to_numpy()
+    rows: dict[str, np.ndarray] = {
+        "hour_of_day": hour,
+        "day_of_week": day,
+        "is_weekend": (day >= 5).astype(int),
+        "month": ts.dt.month.to_numpy(),
+        "hour_sin": np.sin(2 * np.pi * hour / 24.0),
+        "hour_cos": np.cos(2 * np.pi * hour / 24.0),
+        "dow_sin": np.sin(2 * np.pi * day / 7.0),
+        "dow_cos": np.cos(2 * np.pi * day / 7.0),
+    }
+    for lag in sorted(lag_hours):
+        if lag < 1:
+            raise ValueError(f"Lag must be >= 1, got {lag}.")
+        rows[f"lag_{lag}h"] = values[:, -lag] if values.shape[1] >= lag else np.full(len(values), np.nan)
+    for window in sorted(rolling_windows):
+        if window < 1:
+            raise ValueError(f"Rolling window must be >= 1, got {window}.")
+        recent = values[:, -window:]
+        if recent.shape[1] < window:
+            mean = std = np.full(len(values), np.nan)
+        else:
+            valid = np.isfinite(recent).all(axis=1)
+            mean = np.where(valid, np.mean(recent, axis=1), np.nan)
+            std = np.where(valid, np.std(recent, axis=1, ddof=1) if window > 1 else np.nan, np.nan)
+        rows[f"rolling_mean_{window}h"] = mean
+        rows[f"rolling_std_{window}h"] = std
+    return pd.DataFrame(rows, index=timestamps.rename("timestamp"))
+
+
 def get_feature_columns(
     lag_hours: list[int] | None = None,
     rolling_windows: list[int] | None = None,

@@ -10,6 +10,8 @@
 import { LoadingState } from '@/components/ui/LoadingSpinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { getDemoOverviewData, getDemoRecentConsumption } from '@/lib/demoData';
+import { demoModeEnabled } from '@/lib/utils';
+import { DemoDataBanner } from '@/components/ui/DemoDataBanner';
 import { fetchOverview } from '@/lib/api';
 import { OverviewData } from '@/lib/types';
 import { ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area } from 'recharts';
@@ -31,12 +33,14 @@ export default function IntelligenceOverviewPage() {
         
         if (apiData) {
           setOverview(apiData);
-        } else {
+        } else if (demoModeEnabled()) {
           setOverview(getDemoOverviewData());
+        } else {
+          setError('The API has no overview data. Start the backend with validated dataset artifacts, or add ?demo=1 for synthetic preview data.');
         }
       } catch {
-        setError('Failed to load overview data');
-        setOverview(getDemoOverviewData());
+        if (demoModeEnabled()) setOverview(getDemoOverviewData());
+        else setError('Could not reach the API. Add ?demo=1 to view synthetic preview data.');
       } finally {
         setLoading(false);
       }
@@ -65,25 +69,29 @@ export default function IntelligenceOverviewPage() {
     );
   }
   
-  const recentData = overview.recentConsumption || getDemoRecentConsumption();
+  const recentData = overview.recentConsumption || (overview.isDemo ? getDemoRecentConsumption() : []);
   
   // Split data into observed and forecast for chart
-  const midPoint = Math.floor(recentData.length * 0.6);
-  const observedData = recentData.slice(0, midPoint).map(p => ({
+  const observedData = recentData.map(p => ({
     timestamp: new Date(p.timestamp).getTime(),
     time: new Date(p.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
     observed: p.power,
   }));
   
-  const forecastData = recentData.slice(midPoint).map(p => ({
-    timestamp: new Date(p.timestamp).getTime(),
-    time: new Date(p.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-    forecast: p.power,
-    lower: p.power * 0.85,
-    upper: p.power * 1.15,
-  }));
+  const forecastData: typeof observedData = [];
   
   const chartData = [...observedData, ...forecastData];
+
+  if (!overview.isDemo) {
+    return <div className="min-h-screen p-6 md:p-10 text-[#e8f0ec]">
+      <header className="mb-8 border-b border-[#29383d] pb-5"><p className="text-[#93a7ab] text-sm">GridPulse / Intelligence</p><h1 className="mt-2 text-3xl">Historical power overview</h1><p className="mt-2 text-sm text-[#93a7ab]">UCI household data · last observed {new Date(overview.lastUpdated).toLocaleString()}</p></header>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {[['Latest hourly mean', `${overview.currentPower.toFixed(3)} kW`], ['Latest day mean', `${overview.dailyAverage.toFixed(3)} kW`], ['Weekly mean change', `${overview.weeklyChange.toFixed(2)}% (${overview.weeklyTrend})`], ['Anomaly flags · 7 days', String(overview.anomalyCount)]].map(([label, value]) => <section key={label} className="rounded-lg border border-[#29383d] bg-[#121d21] p-5"><p className="text-sm text-[#93a7ab]">{label}</p><p className="mt-3 text-2xl font-mono">{value}</p>{label==='Latest day mean'&&<p className="mt-2 text-xs text-[#93a7ab]">Coverage {overview.dailyCoveragePercentage}% · {overview.dailyObservedHours}/{overview.dailyExpectedHours} available hourly intervals</p>}</section>)}
+      </div>
+      <section className="mt-6 rounded-lg border border-[#29383d] bg-[#121d21] p-5"><h2 className="mb-4 font-medium">Recent observed hourly mean active power (kW)</h2><div className="h-[340px]"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={observedData}><CartesianGrid stroke="#29383d"/><XAxis dataKey="time" tick={{fill:'#93a7ab',fontSize:10}}/><YAxis unit=" kW" tick={{fill:'#93a7ab',fontSize:10}}/><Tooltip/><Line type="monotone" dataKey="observed" stroke="#9cdccb" dot={false}/></ComposedChart></ResponsiveContainer></div></section>
+      <p className="mt-5 text-xs text-[#6b7f84]">Source: {overview.dataSource}. Historical household observations; no live meter connection.</p>
+    </div>;
+  }
   
   return (
     <div className="flex flex-col min-h-screen">
@@ -93,10 +101,11 @@ export default function IntelligenceOverviewPage() {
           <span className="text-[#93a7ab] text-sm">Workspace / Intelligence</span>
         </div>
         <div className="flex items-center gap-4 text-[#93a7ab] text-xs">
-          <span>SNAPSHOT 15 OCT 2026 · 00:10 UTC</span>
+          <span>OBSERVATION · {new Date(overview.lastUpdated).toLocaleString()}</span>
           <button className="p-1.5 hover:bg-[#1a2b30] rounded"><Calendar className="w-4 h-4" /></button>
         </div>
       </header>
+      {overview.isDemo && <div className="px-8 pt-5"><DemoDataBanner /></div>}
       
       {/* Main Content */}
       <div className="flex-1 overflow-auto px-8 py-6">
@@ -114,49 +123,46 @@ export default function IntelligenceOverviewPage() {
           </p>
         </div>
         
-        {/* Demo Data Banner */}
         <div className="bg-[#18252a] border border-[#29383d] px-4 py-2 rounded-lg mb-6 flex items-center gap-2">
-          <span className="bg-[#bcf58a] text-[#0c1215] text-[9px] font-bold px-1.5 py-0.5 rounded">DEMO DATA</span>
-          <span className="text-[#93a7ab] text-xs">14 Oct 2026 · 00:00-23:00 UTC</span>
-          <span className="text-[#6b7f84] text-xs ml-auto">24 / 24 observations · Updated 15 Oct 09:07</span>
+          <span className="text-[#93a7ab] text-xs">Latest observation · {new Date(overview.lastUpdated).toLocaleString()}</span>
+          <span className="text-[#6b7f84] text-xs ml-auto">Hourly mean active power · kW</span>
         </div>
         
         {/* KPI Cards */}
         <div className="grid grid-cols-4 gap-4 mb-6">
           <div className="bg-[#121d21] border border-[#29383d] rounded-lg p-5">
-            <p className="text-[#93a7ab] text-[11px] mb-2">Observed consumption</p>
+            <p className="text-[#93a7ab] text-[11px] mb-2">Mean observed power · latest day</p>
             <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">{overview.dailyAverage ? (overview.dailyAverage * 24).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '5,016'}</span>
-              <span className="text-[#93a7ab] text-sm">kWh</span>
+              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">{overview.dailyAverage.toFixed(3)}</span>
+              <span className="text-[#93a7ab] text-sm">kW</span>
             </div>
-            <p className="text-[#93a7ab] text-[10px]">14 October · daily total</p>
+            <p className="text-[#93a7ab] text-[10px]">Mean of valid hourly observations</p>
           </div>
           
           <div className="bg-[#121d21] border border-[#29383d] rounded-lg p-5">
-            <p className="text-[#93a7ab] text-[11px] mb-2">Next 24 hours</p>
+            <p className="text-[#93a7ab] text-[11px] mb-2">Latest observed power</p>
             <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">4,796</span>
-              <span className="text-[#93a7ab] text-sm">kWh</span>
+              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">{overview.currentPower.toFixed(3)}</span>
+              <span className="text-[#93a7ab] text-sm">kW</span>
             </div>
-            <p className="text-[#b9adff] text-[10px]">−4.4% vs observed day · LightGBM</p>
+            <p className="text-[#b9adff] text-[10px]">Latest valid hourly observation</p>
           </div>
           
           <div className="bg-[#121d21] border border-[#29383d] rounded-lg p-5">
-            <p className="text-[#93a7ab] text-[11px] mb-2">Observed peak</p>
+            <p className="text-[#93a7ab] text-[11px] mb-2">Weekly mean change</p>
             <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">342</span>
-              <span className="text-[#93a7ab] text-sm">kWh</span>
-            </div>
-            <p className="text-[#f3bd75] text-[10px]">18:00 UTC · above historical range</p>
-          </div>
-          
-          <div className="bg-[#121d21] border border-[#29383d] rounded-lg p-5">
-            <p className="text-[#93a7ab] text-[11px] mb-2">Data completeness</p>
-            <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">99.74</span>
+              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">{overview.weeklyChange.toFixed(1)}</span>
               <span className="text-[#93a7ab] text-sm">%</span>
             </div>
-            <p className="text-[#93a7ab] text-[10px]">6,670 of 6,688 hourly records present</p>
+            <p className="text-[#f3bd75] text-[10px]">Compared with the prior seven-day mean</p>
+          </div>
+          
+          <div className="bg-[#121d21] border border-[#29383d] rounded-lg p-5">
+            <p className="text-[#93a7ab] text-[11px] mb-2">Anomalies · latest 7 days</p>
+            <div className="flex items-baseline gap-2 mb-1">
+              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">{overview.anomalyCount}</span>
+            </div>
+            <p className="text-[#93a7ab] text-[10px]">Seasonal baseline flags</p>
           </div>
         </div>
         
@@ -166,7 +172,7 @@ export default function IntelligenceOverviewPage() {
             <div>
               <h2 className="text-[#e8f0ec] text-sm font-medium mb-1">The energy horizon</h2>
               <p className="text-[#93a7ab] text-[11px]">
-                Observed consumption meets the next 24 hours. All values are hourly energy, in kWh.
+                Historical hourly mean active power. Forecasts are shown on the Forecast screen.
               </p>
             </div>
             <div className="flex items-center gap-4">
@@ -175,7 +181,7 @@ export default function IntelligenceOverviewPage() {
               </button>
               <button className="bg-[#18252a] border border-[#29383d] px-3 py-1.5 rounded text-[#e8f0ec] text-xs flex items-center gap-2">
                 <Calendar className="w-3 h-3" />
-                14-15 Oct 2026
+                14-Selected data period
               </button>
             </div>
           </div>
@@ -210,7 +216,7 @@ export default function IntelligenceOverviewPage() {
                   tick={{ fill: '#6b7f84', fontSize: 10 }}
                   stroke="#29383d"
                   tickLine={false}
-                  label={{ value: 'kWh', angle: 0, position: 'top', fill: '#6b7f84', fontSize: 10, offset: 10 }}
+                  label={{ value: 'kW', angle: 0, position: 'top', fill: '#6b7f84', fontSize: 10, offset: 10 }}
                 />
                 <Tooltip 
                   contentStyle={{ 
@@ -255,9 +261,9 @@ export default function IntelligenceOverviewPage() {
           </div>
           
           <p className="text-[#6b7f84] text-[9px] mt-4">
-            LightGBM v2.4 · Pointwise 90% prediction interval · Forecast issued 15 Oct 00:08 UTC
+            Historical observations only · No prediction interval is shown on this chart.
           </p>
-          <p className="text-[#6b7f84] text-[9px] text-right mt-2">48 hours / UTC</p>
+          <p className="text-[#6b7f84] text-[9px] text-right mt-2">48 hours / dataset time</p>
         </div>
         
         {/* Intelligence Briefing */}
@@ -280,7 +286,7 @@ export default function IntelligenceOverviewPage() {
                 <div>
                   <h4 className="text-[#e8f0ec] text-sm font-medium mb-1">An elevated evening load</h4>
                   <p className="text-[#93a7ab] text-xs">
-                    14 Oct, 18:00-20:00 exceeded the expected range. A later shutdown is one hypothesis, not a confirmed cause.
+                    Selected observation window exceeded the expected range. A later shutdown is one hypothesis, not a confirmed cause.
                   </p>
                 </div>
                 <span className="text-[#f3bd75] text-2xl font-bold leading-none">+37.9%</span>
@@ -302,22 +308,22 @@ export default function IntelligenceOverviewPage() {
             
             <div className="mb-4">
               <h4 className="text-[#e8f0ec] text-base font-medium mb-2">A softer evening peak is expected.</h4>
-              <p className="text-[#93a7ab] text-xs mb-1">15 Oct · 18:00 UTC</p>
+              <p className="text-[#93a7ab] text-xs mb-1">Forecast peak time</p>
               <div className="flex items-baseline gap-2">
                 <span className="text-[#e8f0ec] text-2xl font-mono">286</span>
-                <span className="text-[#93a7ab] text-sm">kWh</span>
+                <span className="text-[#93a7ab] text-sm">kW</span>
               </div>
             </div>
             
             <p className="text-[#93a7ab] text-[10px] leading-relaxed">
-              80% interval at peak: 244-328 kWh. Wider ranges reflect greater uncertainty, not higher consumption.
+              80% interval at peak: 244-328 kW. Wider ranges reflect greater uncertainty, not higher consumption.
             </p>
           </div>
         </div>
         
         {/* Footer */}
         <div className="mt-8 pt-4 border-t border-[#29383d] flex items-center justify-between text-[10px] text-[#6b7f84]">
-          <span>NB-01 / ELECTRICITY / HOURLY kWh / UTC</span>
+          <span>UCI-HOUSEHOLD / ELECTRICITY / HOURLY kW / dataset time</span>
           <span>Demo data · Estimates are not operational guarantees</span>
         </div>
       </div>

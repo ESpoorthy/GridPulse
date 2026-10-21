@@ -1,10 +1,8 @@
 /**
  * TypeScript type definitions for GridPulse API contracts.
  * 
- * These types define the shape of data exchanged between the frontend and
- * the planned FastAPI backend. They will be used for both:
- * - Demo data (clearly labeled as such)
- * - Future real API integration
+ * These types define the shape of data exchanged with FastAPI and explicitly
+ * selected synthetic demo fixtures.
  * 
  * All timestamps are ISO 8601 strings, all power values are in kW.
  */
@@ -18,6 +16,9 @@ export interface OverviewData {
   dailyAverage: number; // Average daily consumption in kW
   weeklyTrend: 'up' | 'down' | 'stable';
   weeklyChange: number; // Percentage change
+  dailyObservedHours: number;
+  dailyExpectedHours: number;
+  dailyCoveragePercentage: number;
   anomalyCount: number; // Count of anomalies in recent period
   lastUpdated: string; // ISO 8601 timestamp
   dataSource: string; // e.g., "UCI Historical Data (2006-2010)"
@@ -65,7 +66,7 @@ export interface AnomalyEvent {
   timestamp: string; // ISO 8601
   observedPower: number; // Observed value in kW
   expectedPower: number; // Expected/baseline value in kW
-  deviation: number; // Percentage deviation
+  deviation: number | null; // Percentage difference is undefined when expected power is zero
   severity: 'low' | 'medium' | 'high';
   reason: string; // Human-readable explanation
   confidence?: number; // Detection confidence (0-1)
@@ -100,6 +101,14 @@ export interface ModelMetrics {
   testSamples: number;
   trainingTime?: number; // Seconds
   isBaseline: boolean; // True for persistence/seasonal-naive
+  recursiveValidation?: {
+    mae: number;
+    rmse: number;
+    forecastOrigins: number;
+    evaluatedHours: number;
+    evaluationPeriod: { start: string; end: string };
+    stepGroupMetrics: Record<string, { mae: number; rmse: number }>;
+  } | null;
 }
 
 export interface ModelComparisonData {
@@ -110,6 +119,15 @@ export interface ModelComparisonData {
     end: string; // ISO 8601
   };
   splitRatio: string; // e.g., "70/15/15"
+  forecastHorizon: number;
+  selectionMetric: string;
+  recursiveTest?: {
+    metrics: { mae: number; rmse: number };
+    step_group_metrics: Record<string, { mae: number; rmse: number }>;
+    forecast_origins: number;
+    evaluated_hours: number;
+    evaluation_period: { start: string; end: string };
+  } | null;
   isDemo: boolean;
 }
 
@@ -136,6 +154,10 @@ export interface DataQualityMetrics {
   validRows: number;
   missingRows: number;
   missingPercentage: number;
+  duplicateRowsExcluded: number;
+  timestampParseFailures: number;
+  missingMinuteTimestamps: number;
+  excludedHourlyIntervals: number;
   dateRange: {
     start: string; // ISO 8601
     end: string; // ISO 8601

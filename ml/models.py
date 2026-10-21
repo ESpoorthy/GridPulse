@@ -227,7 +227,7 @@ def create_random_forest(
             max_depth=max_depth,
             min_samples_split=min_samples_split,
             random_state=random_state,
-            n_jobs=-1,  # Use all CPU cores
+            n_jobs=1,  # Keep experiments reproducible and avoid uncontrolled worker pools
         ),
         feature_cols=feature_cols,
         name="RandomForest",

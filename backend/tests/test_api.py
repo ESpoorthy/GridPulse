@@ -7,6 +7,10 @@ import pytest
 from fastapi.testclient import TestClient
 from pathlib import Path
 import sys
+import json
+
+import pandas as pd
+import joblib
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -14,6 +18,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from backend.app.main import app
 
 client = TestClient(app)
+
+
+class LastObservedModel:
+    feature_cols = ["lag_1h"]
+
+    def predict(self, frame):
+        return frame["lag_1h"].to_numpy()
 
 
 class TestHealthEndpoint:
@@ -179,6 +190,81 @@ class TestCORS:
         
         # FastAPI CORS middleware should add these headers
         assert response.status_code in [200, 204]
+
+
+def test_api_uses_controlled_generated_data_not_fixed_values(tmp_path, monkeypatch):
+    """Overview, health, metrics, and anomaly results follow their artifacts."""
+    from backend.app import main as api
+
+    timestamps = pd.date_range("2008-01-01", periods=24 * 15, freq="h")
+    powers = [1.0 + (index % 24) / 100 for index in range(len(timestamps))]
+    powers[-25] = 0.0
+    powers[-1] = 4.0
+    pd.DataFrame({"timestamp": timestamps, "global_active_power_mean_kw": powers}).to_csv(
+        tmp_path / "hourly.csv", index=False
+    )
+    (tmp_path / "validation.json").write_text(json.dumps({
+        "dataset_name": "Fixture household", "input_file": "fixture.txt", "row_count": 21600,
+        "non_missing_target_rows": 21500, "timestamp_parse_failures": 2,
+        "duplicate_rows_excluded_from_aggregation": 3, "missing_minute_timestamps_in_range": 4,
+        "missing_numeric_values": {"Global_active_power": 100}, "numeric_parse_errors": {"Global_active_power": 0},
+        "first_timestamp": timestamps[0].isoformat(), "last_timestamp": timestamps[-1].isoformat(),
+        "hourly_aggregation": {"hourly_bins_in_time_range": 360, "eligible_hours": 359,
+            "excluded_hours_below_coverage_threshold": 1},
+        "warnings": [], "validation_status": "passed_with_warnings",
+    }), encoding="utf-8")
+    (tmp_path / "results.json").write_text(json.dumps({
+        "models": {"linear_regression": {"validation": {"mae": .2}, "test": {"mae": .3, "rmse": .4},
+            "recursive_validation": {"metrics": {"mae": .25, "rmse": .35}, "forecast_origins": 5,
+                "evaluated_hours": 120, "step_group_metrics": {}}}},
+        "best_model": "linear_regression", "split_ratio": "70/15/15", "train_samples": 200,
+        "test_samples": 50, "test_period": {"start": "2008-01-01", "end": "2008-01-02"},
+        "horizon_hours": 24, "selection_metric": "24-hour recursive validation MAE",
+        "recursive_test": {"metrics": {"mae": .4, "rmse": .5}, "forecast_origins": 3,
+            "evaluated_hours": 72, "step_group_metrics": {}, "evaluation_period": {"start": "2008-01-01", "end": "2008-01-03"}},
+        "anomaly_calibration": {"method": "fixture validation quantiles", "threshold_low_kw": .1,
+            "threshold_medium_kw": .2, "threshold_high_kw": .3},
+    }), encoding="utf-8")
+    monkeypatch.setattr(api, "HOURLY_PATH", tmp_path / "hourly.csv")
+    monkeypatch.setattr(api, "VALIDATION_PATH", tmp_path / "validation.json")
+    monkeypatch.setattr(api, "RESULTS_PATH", tmp_path / "results.json")
+    model_artifact = tmp_path / "model.joblib"
+    joblib.dump({"model": LastObservedModel(), "metadata": {"best_model": "fixture_model"}}, model_artifact)
+    monkeypatch.setattr(api, "MODEL_PATH", model_artifact)
+
+    overview = client.get("/api/v1/overview").json()
+    health = client.get("/api/v1/dataset-health").json()
+    metrics = client.get("/api/v1/model-metrics").json()
+    anomalies = client.get("/api/v1/anomalies").json()
+
+    assert overview["current_power"] == 4.0
+    assert overview["daily_observed_hours"] == 24
+    assert overview["daily_expected_hours"] == 24
+    assert overview["daily_coverage_percentage"] == 100
+    assert overview["anomaly_count"] == anomalies["total_count"]
+    assert health["statistics"]["mean"] == pytest.approx(pd.Series(powers).mean())
+    assert health["quality"]["total_rows"] == 21600
+    assert health["quality"]["duplicate_rows_excluded"] == 3
+    assert health["quality"]["timestamp_parse_failures"] == 2
+    assert health["quality"]["missing_minute_timestamps"] == 4
+    assert health["quality"]["excluded_hourly_intervals"] == 1
+    assert metrics["models"][0]["test_samples"] == 50
+    assert metrics["models"][0]["mae"] == .3
+    assert metrics["forecast_horizon"] == 24
+    assert metrics["models"][0]["recursive_validation"]["forecast_origins"] == 5
+    assert metrics["recursive_test"]["forecast_origins"] == 3
+    latest_anomaly = next(event for event in anomalies["events"] if event["timestamp"] == timestamps[-1].isoformat())
+    assert latest_anomaly["severity"] == "high"
+    assert latest_anomaly["deviation"] is None
+
+    forecast = client.get("/api/v1/forecast")
+    assert forecast.status_code == 200
+    forecast_data = forecast.json()
+    assert forecast_data["horizon"] == 24
+    assert len(forecast_data["forecast"]) == 24
+    assert forecast_data["forecast"][0]["timestamp"] == (timestamps[-1] + pd.Timedelta(hours=1)).isoformat()
+    assert forecast_data["forecast"][-1]["timestamp"] == (timestamps[-1] + pd.Timedelta(hours=24)).isoformat()
+    assert all(point["lower"] is None and point["upper"] is None for point in forecast_data["forecast"])
 
 
 class TestForecastEndpoint:

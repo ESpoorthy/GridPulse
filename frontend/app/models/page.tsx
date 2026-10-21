@@ -1,6 +1,6 @@
 /**
  * Better models. Measured fairly. - Figma Design Implementation
- * 
+ *
  * Compare ML model performance with fair benchmarking.
  * Uses real API data when backend is available, falls back to demo data.
  */
@@ -10,6 +10,8 @@
 import { LoadingState } from '@/components/ui/LoadingSpinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { getDemoModelComparisonData } from '@/lib/demoData';
+import { demoModeEnabled } from '@/lib/utils';
+import { DemoDataBanner } from '@/components/ui/DemoDataBanner';
 import { fetchModelMetrics } from '@/lib/api';
 import { ModelComparisonData } from '@/lib/types';
 import { Calendar, CheckCircle2 } from 'lucide-react';
@@ -20,31 +22,33 @@ export default function ModelsPage() {
   const [comparisonData, setComparisonData] = useState<ModelComparisonData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
+
   useEffect(() => {
     async function loadData() {
       setLoading(true);
       setError(null);
-      
+
       try {
         const apiData = await fetchModelMetrics();
-        
+
         if (apiData) {
           setComparisonData(apiData);
-        } else {
+        } else if (demoModeEnabled()) {
           setComparisonData(getDemoModelComparisonData());
+        } else {
+          setError('Experiment metrics are unavailable. Run scripts/train_models.py, or add ?demo=1 for synthetic preview data.');
         }
       } catch {
-        setError('Failed to load model metrics');
-        setComparisonData(getDemoModelComparisonData());
+        if (demoModeEnabled()) setComparisonData(getDemoModelComparisonData());
+        else setError('Could not reach the API. Add ?demo=1 to view synthetic preview data.');
       } finally {
         setLoading(false);
       }
     }
-    
+
     loadData();
   }, []);
-  
+
   if (loading) {
     return (
       <div className="p-8">
@@ -52,7 +56,7 @@ export default function ModelsPage() {
       </div>
     );
   }
-  
+
   if (error || !comparisonData) {
     return (
       <div className="p-8">
@@ -64,15 +68,17 @@ export default function ModelsPage() {
       </div>
     );
   }
-  
-  // Chart data for MAE across horizons
-  const horizonData = [
-    { horizon: '01-06 h', LightGBM: 10.2, LSTM: 11.5, Seasonal: 16.8 },
-    { horizon: '07-12 h', LightGBM: 12.8, LSTM: 14.2, Seasonal: 22.5 },
-    { horizon: '13-18 h', LightGBM: 15.1, LSTM: 17.8, Seasonal: 27.4 },
-    { horizon: '19-24 h', LightGBM: 16.9, LSTM: 20.1, Seasonal: 30.8 },
-  ];
-  
+
+  const horizonData = comparisonData.models.map((model) => ({ name: model.name, MAE: model.mae, RMSE: model.rmse }));
+
+  if (!comparisonData.isDemo) {
+    const recursiveTest = comparisonData.recursiveTest;
+    return <div className="min-h-screen p-6 md:p-10 text-[#e8f0ec]"><header className="mb-8 border-b border-[#29383d] pb-5"><p className="text-sm text-[#93a7ab]">GridPulse / Models</p><h1 className="mt-2 text-3xl">24-hour recursive comparison</h1><p className="mt-2 text-sm text-[#93a7ab]">One-step held-out test period: {new Date(comparisonData.evaluationPeriod.start).toLocaleString()} – {new Date(comparisonData.evaluationPeriod.end).toLocaleString()}</p></header>
+      <section className="mb-5 rounded-lg border border-[#29383d] bg-[#121d21] p-5"><p className="text-sm text-[#93a7ab]">Selected by {comparisonData.selectionMetric}</p><p className="mt-2 text-2xl">{comparisonData.bestModel}</p><p className="mt-2 text-xs text-[#93a7ab]">Recursive {comparisonData.forecastHorizon}-hour MAE/RMSE use validation windows. The separate test columns below are rolling one-step scores and are not 24-hour scores.</p></section>
+      <section className="mb-5 rounded-lg border border-[#29383d] bg-[#121d21] p-5"><p className="text-sm text-[#93a7ab]">Selected model · held-out recursive {comparisonData.forecastHorizon}-hour test ({recursiveTest?.forecast_origins ?? 0} origins / {recursiveTest?.evaluated_hours ?? 0} target hours)</p><div className="mt-3 flex flex-wrap gap-8 text-sm"><span>MAE <strong className="ml-2 font-mono">{recursiveTest?.metrics.mae.toFixed(4) ?? 'Unavailable'} kW</strong></span><span>RMSE <strong className="ml-2 font-mono">{recursiveTest?.metrics.rmse.toFixed(4) ?? 'Unavailable'} kW</strong></span></div><p className="mt-2 text-xs text-[#93a7ab]">Step groups: 1–6h {recursiveTest?.step_group_metrics.hours_1_6?.mae.toFixed(4) ?? 'Unavailable'} MAE · 7–12h {recursiveTest?.step_group_metrics.hours_7_12?.mae.toFixed(4) ?? 'Unavailable'} MAE · 13–24h {recursiveTest?.step_group_metrics.hours_13_24?.mae.toFixed(4) ?? 'Unavailable'} MAE (kW).</p></section>
+      <section className="overflow-x-auto rounded-lg border border-[#29383d] bg-[#121d21] p-5"><table className="w-full text-left text-sm"><thead className="text-[#93a7ab]"><tr><th className="p-2">Model</th><th className="p-2">24h validation MAE (kW)</th><th className="p-2">24h validation RMSE (kW)</th><th className="p-2">Origins</th><th className="p-2">1h test MAE (kW)</th><th className="p-2">1h test RMSE (kW)</th></tr></thead><tbody>{comparisonData.models.map(model=><tr key={model.name} className="border-t border-[#29383d]"><td className="p-2">{model.name}</td><td className="p-2 font-mono">{model.recursiveValidation?.mae.toFixed(4) ?? 'Unavailable'}</td><td className="p-2 font-mono">{model.recursiveValidation?.rmse.toFixed(4) ?? 'Unavailable'}</td><td className="p-2">{model.recursiveValidation?.forecastOrigins.toLocaleString() ?? 'Unavailable'}</td><td className="p-2 font-mono">{model.mae.toFixed(4)}</td><td className="p-2 font-mono">{model.rmse.toFixed(4)}</td></tr>)}</tbody></table></section></div>;
+  }
+
   return (
     <div className="flex flex-col min-h-screen">
       {/* Header */}
@@ -81,11 +87,12 @@ export default function ModelsPage() {
           <span className="text-[#93a7ab] text-sm">Workspace / Models</span>
         </div>
         <div className="flex items-center gap-4 text-[#93a7ab] text-xs">
-          <span>SNAPSHOT 15 OCT 2026 · 00:10 UTC</span>
+          <span>TEST PERIOD · {new Date(comparisonData.evaluationPeriod.start).toLocaleDateString()} – {new Date(comparisonData.evaluationPeriod.end).toLocaleDateString()}</span>
           <button className="p-1.5 hover:bg-[#1a2b30] rounded"><Calendar className="w-4 h-4" /></button>
         </div>
       </header>
-      
+      {comparisonData.isDemo && <div className="px-8 pt-5"><DemoDataBanner /></div>}
+
       {/* Main Content */}
       <div className="flex-1 overflow-auto px-8 py-6">
         {/* Page Title */}
@@ -101,18 +108,18 @@ export default function ModelsPage() {
             Compare predictive accuracy, uncertainty and inference cost on the same held-out hours.
           </p>
         </div>
-        
+
         {/* Evaluation Controls */}
         <div className="flex items-center gap-3 mb-6">
           <button className="bg-[#18252a] border border-[#29383d] px-3 py-2 rounded text-[#e8f0ec] text-xs flex items-center gap-2">
             <Calendar className="w-3 h-3" />
-            01-14 Oct 2026
+            01-Selected data period
           </button>
           <button className="bg-[#18252a] border border-[#29383d] px-3 py-2 rounded text-[#e8f0ec] text-xs">
             24-hour horizon
           </button>
           <button className="bg-[#18252a] border border-[#29383d] px-3 py-2 rounded text-[#e8f0ec] text-xs">
-            NB-01 · hourly
+            UCI-HOUSEHOLD · hourly
           </button>
           <div className="ml-auto flex items-center gap-2">
             <span className="bg-[#bcf58a] text-[#0c1215] text-[9px] font-bold px-2 py-0.5 rounded uppercase">DEMO</span>
@@ -121,7 +128,7 @@ export default function ModelsPage() {
             </span>
           </div>
         </div>
-        
+
         {/* Selected Model Spotlight */}
         <div className="bg-gradient-to-r from-[#1a2b30] to-[#121d21] border border-[#29383d] rounded-lg p-6 mb-6">
           <div className="flex items-start justify-between">
@@ -148,19 +155,19 @@ export default function ModelsPage() {
             </div>
           </div>
         </div>
-        
+
         <p className="text-[#6b7f84] text-xs mb-6">
-          14 daily origins. 336 identical target hours. Hourly energy forecasts evaluated over 01-14 October. 
+          14 daily origins. 336 identical target hours. Hourly energy forecasts evaluated over 01-Latest observation day.
           All candidates use the same split, forecast horizon and scoring rules. Lower error is better.
         </p>
-        
+
         {/* Benchmark Results Table */}
         <div className="bg-[#121d21] border border-[#29383d] rounded-lg p-6 mb-6">
           <h3 className="text-[#e8f0ec] text-sm font-medium mb-4">Benchmark results</h3>
           <p className="text-[#93a7ab] text-xs mb-4">
-            Held-out evaluation · 01 Oct 00:00 through 14 Oct 23:00 UTC
+            Held-out evaluation · Chronological held-out test window
           </p>
-          
+
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -176,7 +183,7 @@ export default function ModelsPage() {
               </thead>
               <tbody>
                 {comparisonData.models.slice(0, 3).map((model, idx) => (
-                  <tr 
+                  <tr
                     key={idx}
                     className={`border-b border-[#29383d] ${
                       model.name === comparisonData.bestModel ? 'bg-[#1a2b30]' : ''
@@ -189,10 +196,10 @@ export default function ModelsPage() {
                       </div>
                     </td>
                     <td className="py-3 px-3 text-right">
-                      <span className="text-[#e8f0ec] font-mono">{(model.mae ?? 0).toFixed(1)} kWh</span>
+                      <span className="text-[#e8f0ec] font-mono">{(model.mae ?? 0).toFixed(1)} kW</span>
                     </td>
                     <td className="py-3 px-3 text-right">
-                      <span className="text-[#93a7ab] font-mono">{(model.rmse ?? 0).toFixed(1)} kWh</span>
+                      <span className="text-[#93a7ab] font-mono">{(model.rmse ?? 0).toFixed(1)} kW</span>
                     </td>
                     <td className="py-3 px-3 text-right">
                       <span className="text-[#93a7ab] font-mono">6.4%</span>
@@ -219,124 +226,117 @@ export default function ModelsPage() {
               </tbody>
             </table>
           </div>
-          
+
           <div className="mt-4 text-[10px] text-[#6b7f84] space-y-1">
             <p>¹ Pointwise interval coverage: target 90%. Intervals calibrated on 17-30 Sep, before the test window.</p>
             <p>² Mean inference time for one 24-hour batch on the same CPU. Forecast uses selected model and 14 Oct.</p>
           </div>
         </div>
-        
+
         {/* Accuracy & Comparison Cards */}
         <div className="grid grid-cols-[2fr_1fr] gap-5">
           <div className="bg-[#121d21] border border-[#29383d] rounded-lg p-6">
             <div className="mb-4">
-              <h3 className="text-[#e8f0ec] text-sm font-medium mb-1">Accuracy holds as the horizon extends</h3>
+              <h3 className="text-[#e8f0ec] text-sm font-medium mb-1">One-step holdout error by model</h3>
               <p className="text-[#93a7ab] text-xs">
-                Mean absolute error by lead-time group · 84 predictions per group
+                All models use the same chronological test observations. Metrics are in kW.
               </p>
             </div>
-            
+
             <div className="flex items-center gap-6 mb-4 text-[10px]">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-0.5 bg-[#bcf58a]"></div>
-                <span className="text-[#93a7ab]">LightGBM</span>
+                <span className="text-[#93a7ab]">MAE</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-0.5 bg-[#b9adff]"></div>
-                <span className="text-[#93a7ab]">LSTM</span>
+                <span className="text-[#93a7ab]">RMSE</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-0.5 bg-[#6b7f84]"></div>
-                <span className="text-[#93a7ab]">Seasonal naive</span>
+                <span className="text-[#93a7ab]">kW error</span>
               </div>
             </div>
-            
+
             <div className="h-[280px] -mx-2">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={horizonData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#29383d" vertical={false} />
-                  <XAxis 
-                    dataKey="horizon" 
+                  <XAxis
+                    dataKey="name"
                     tick={{ fill: '#6b7f84', fontSize: 10 }}
                     stroke="#29383d"
                     tickLine={false}
                     label={{ value: 'Lead-time from forecast origin', position: 'bottom', fill: '#6b7f84', fontSize: 10, offset: 0 }}
                   />
-                  <YAxis 
+                  <YAxis
                     tick={{ fill: '#6b7f84', fontSize: 10 }}
                     stroke="#29383d"
                     tickLine={false}
-                    label={{ value: 'MAE / kWh', angle: 0, position: 'top', fill: '#6b7f84', fontSize: 10, offset: 10 }}
+                    label={{ value: 'Error / kW', angle: 0, position: 'top', fill: '#6b7f84', fontSize: 10, offset: 10 }}
                   />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: '#121d21', 
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#121d21',
                       border: '1px solid #29383d',
                       borderRadius: '0.5rem',
                       fontSize: '11px',
                       color: '#e8f0ec'
                     }}
                   />
-                  <Line 
-                    type="monotone" 
-                    dataKey="LightGBM" 
-                    stroke="#bcf58a" 
+                  <Line
+                    type="monotone"
+                    dataKey="MAE"
+                    stroke="#bcf58a"
                     strokeWidth={2}
                     dot={{ r: 4, fill: '#bcf58a' }}
                   />
-                  <Line 
-                    type="monotone" 
-                    dataKey="LSTM" 
-                    stroke="#b9adff" 
+                  <Line
+                    type="monotone"
+                    dataKey="RMSE"
+                    stroke="#b9adff"
                     strokeWidth={2}
                     dot={{ r: 4, fill: '#b9adff' }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="Seasonal" 
-                    stroke="#6b7f84" 
-                    strokeWidth={2}
-                    dot={{ r: 4, fill: '#6b7f84' }}
                   />
                 </LineChart>
               </ResponsiveContainer>
             </div>
           </div>
-          
+
           <div className="bg-[#121d21] border border-[#29383d] rounded-lg p-6">
             <h3 className="text-[#e8f0ec] text-sm font-medium mb-4">A fair comparison, by design</h3>
-            
+
             <div className="space-y-4">
               <div>
                 <h4 className="text-[#e8f0ec] text-xs font-medium mb-1">No future leakage</h4>
                 <p className="text-[#93a7ab] text-[10px] leading-relaxed">
-                  Tuning ended 30 Sep. Model parameters are frozen during evaluation; 
+                  Tuning ended 30 Sep. Model parameters are frozen during evaluation;
                   lag inputs use only past observations.
                 </p>
               </div>
-              
+
               <div>
                 <h4 className="text-[#e8f0ec] text-xs font-medium mb-1">Same target hours</h4>
                 <p className="text-[#93a7ab] text-[10px] leading-relaxed">
-                  14 non-overlapping, daily 24-hour origins. All 336 target hours are observed; 
+                  14 non-overlapping, daily 24-hour origins. All 336 target hours are observed;
                   no imputed targets are scored.
                 </p>
               </div>
-              
+
               <div>
                 <h4 className="text-[#e8f0ec] text-xs font-medium mb-1">Calibration is separate</h4>
                 <p className="text-[#93a7ab] text-[10px] leading-relaxed">
-                  Pointwise interval coverage: target 90%. Intervals calibrated on 17-30 Sep, 
+                  Pointwise interval coverage: target 90%. Intervals calibrated on 17-30 Sep,
                   before the test window.
                 </p>
               </div>
             </div>
           </div>
         </div>
-        
+
         {/* Footer */}
         <div className="mt-8 pt-4 border-t border-[#29383d] flex items-center justify-between text-[10px] text-[#6b7f84]">
-          <span>NB-01 / ELECTRICITY / HOURLY kWh / UTC</span>
+          <span>UCI-HOUSEHOLD / ELECTRICITY / HOURLY kW / dataset time</span>
           <span>Demo data · Estimates are not operational guarantees</span>
         </div>
       </div>

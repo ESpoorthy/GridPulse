@@ -1,6 +1,7 @@
 """Tests for real dataset integration and loading."""
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -273,6 +274,15 @@ class TestPrepareForTraining:
         assert "timestamp" not in feature_cols
         assert "global_active_power_mean_kw" not in feature_cols
         assert len(feature_cols) > 0
+
+    def test_feature_columns_exclude_hourly_coverage_metadata(self):
+        hourly_df = pd.DataFrame({
+            "timestamp": pd.date_range("2007-01-01", periods=200, freq="h"),
+            "global_active_power_mean_kw": np.random.rand(200) + 1.0,
+            "valid_minutes": [60] * 200,
+        })
+        result = prepare_for_training(hourly_df, lag_hours=[1], rolling_windows=[3])
+        assert "valid_minutes" not in result["feature_columns"]
     
     def test_split_info_contains_metadata(self):
         """Split info should contain useful metadata."""
@@ -306,9 +316,10 @@ class TestPrepareForTraining:
 class TestDownloadUCIDataset:
     """Test UCI dataset download functionality."""
     
+    @patch('ml.data_loader.hashlib.sha256')
     @patch('ml.data_loader.urlopen')
     @patch('ml.data_loader.zipfile.ZipFile')
-    def test_downloads_and_extracts_dataset(self, mock_zipfile, mock_urlopen, tmp_path):
+    def test_downloads_and_extracts_dataset(self, mock_zipfile, mock_urlopen, mock_sha256, tmp_path):
         """Should download, verify, and extract the dataset."""
         # Mock HTTP response
         mock_response = Mock()
@@ -320,22 +331,22 @@ class TestDownloadUCIDataset:
         # Mock ZIP extraction
         mock_zip = Mock()
         mock_zip.namelist.return_value = ['household_power_consumption.txt']
-        mock_zip.extract = Mock()
+        mock_zip.open.return_value = BytesIO(b"Date;Time;Global_active_power\n")
         mock_zipfile.return_value.__enter__ = Mock(return_value=mock_zip)
         mock_zipfile.return_value.__exit__ = Mock(return_value=False)
         
-        # Create the extracted file manually (since we're mocking extract)
         output_dir = tmp_path / "raw"
         output_dir.mkdir()
-        dataset_file = output_dir / "household_power_consumption.txt"
-        dataset_file.write_text("Date;Time;Global_active_power\n")
+        from ml.data_loader import UCI_ZIP_SHA256
+        mock_sha256.return_value.hexdigest.return_value = UCI_ZIP_SHA256
         
-        # Download (with MD5 verification disabled to avoid mocking hash)
-        result = download_uci_dataset(output_dir, verify_md5=False, force=True)
+        result = download_uci_dataset(output_dir, force=True)
         
         # Verify download was called
         assert mock_urlopen.called
         assert result.exists()
+        assert result.read_text() == "Date;Time;Global_active_power\n"
+        assert mock_sha256.return_value.update.called
     
     def test_skips_download_if_file_exists(self, tmp_path):
         """Should not re-download if file already exists and force=False."""
@@ -351,6 +362,18 @@ class TestDownloadUCIDataset:
         # Should return existing file without modification
         assert result == existing_file.resolve()
         assert existing_file.read_text() == "existing data"
+
+    @patch('ml.data_loader.hashlib.sha256')
+    @patch('ml.data_loader.urlopen')
+    def test_rejects_archive_with_unexpected_checksum(self, mock_urlopen, mock_sha256, tmp_path):
+        response = Mock(headers={"content-length": "1"})
+        response.read = Mock(side_effect=[b"x", b""])
+        mock_urlopen.return_value.__enter__ = Mock(return_value=response)
+        mock_urlopen.return_value.__exit__ = Mock(return_value=False)
+        mock_sha256.return_value.hexdigest.return_value = "0" * 64
+        with pytest.raises(RuntimeError, match="SHA-256 checksum mismatch"):
+            download_uci_dataset(tmp_path, force=True)
+        assert not (tmp_path / "household_power_consumption.zip").exists()
     
     @patch('ml.data_loader.urlopen')
     def test_raises_on_download_failure(self, mock_urlopen, tmp_path):
@@ -358,7 +381,7 @@ class TestDownloadUCIDataset:
         mock_urlopen.side_effect = Exception("Network error")
         
         with pytest.raises(RuntimeError, match="Failed to download UCI dataset"):
-            download_uci_dataset(tmp_path, verify_md5=False)
+            download_uci_dataset(tmp_path)
 
 
 class TestEndToEndIntegration:

@@ -10,6 +10,8 @@
 import { LoadingState } from '@/components/ui/LoadingSpinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { getDemoDataHealthData } from '@/lib/demoData';
+import { demoModeEnabled } from '@/lib/utils';
+import { DemoDataBanner } from '@/components/ui/DemoDataBanner';
 import { fetchDataHealth } from '@/lib/api';
 import { DataHealthData } from '@/lib/types';
 import { Calendar, CheckCircle2, AlertTriangle } from 'lucide-react';
@@ -30,12 +32,14 @@ export default function DataHealthPage() {
         
         if (apiData) {
           setHealthData(apiData);
-        } else {
+        } else if (demoModeEnabled()) {
           setHealthData(getDemoDataHealthData());
+        } else {
+          setError('Validated dataset health is unavailable. Run scripts/train_models.py, or add ?demo=1 for synthetic preview data.');
         }
       } catch {
-        setError('Failed to load data health metrics');
-        setHealthData(getDemoDataHealthData());
+        if (demoModeEnabled()) setHealthData(getDemoDataHealthData());
+        else setError('Could not reach the API. Add ?demo=1 to view synthetic preview data.');
       } finally {
         setLoading(false);
       }
@@ -63,6 +67,17 @@ export default function DataHealthPage() {
       </div>
     );
   }
+
+  if (!healthData.isDemo) {
+    const stats = healthData.statistics;
+    const quality = healthData.quality;
+    return <div className="min-h-screen p-6 md:p-10 text-[#e8f0ec]"><header className="mb-8 border-b border-[#29383d] pb-5"><p className="text-sm text-[#93a7ab]">GridPulse / Data trust</p><h1 className="mt-2 text-3xl">Dataset quality</h1><p className="mt-2 text-sm text-[#93a7ab]">{healthData.datasetName} · {healthData.sourceFile}</p></header>
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[['Raw source rows',quality.totalRows.toLocaleString()],['Missing or invalid target readings',`${quality.missingRows.toLocaleString()} (${quality.missingPercentage}%)`],['Eligible hourly observations',`${quality.coverage.eligibleHours.toLocaleString()} / ${quality.coverage.totalHours.toLocaleString()}`],['Hourly coverage',`${quality.coverage.coveragePercentage}%`]].map(([label,value])=><article key={label} className="rounded-lg border border-[#29383d] bg-[#121d21] p-5"><p className="text-sm text-[#93a7ab]">{label}</p><p className="mt-3 text-2xl font-mono">{value}</p></article>)}</section>
+      <section className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[['Duplicate rows excluded',quality.duplicateRowsExcluded],['Timestamp parse failures',quality.timestampParseFailures],['Missing minute timestamps',quality.missingMinuteTimestamps],['Hours excluded by coverage',quality.excludedHourlyIntervals]].map(([label,value])=><article key={label} className="rounded-lg border border-[#29383d] bg-[#121d21] p-4"><p className="text-xs text-[#93a7ab]">{label}</p><p className="mt-2 text-xl font-mono">{Number(value).toLocaleString()}</p></article>)}</section>
+      <section className="mt-6 grid gap-5 lg:grid-cols-2"><article className="rounded-lg border border-[#29383d] bg-[#121d21] p-5"><h2 className="mb-4 font-medium">Hourly mean active power by hour (kW)</h2><div className="space-y-2">{healthData.hourlyDistribution.map(item=><div key={item.hour} className="flex justify-between border-b border-[#29383d] py-2 text-sm"><span>{String(item.hour).padStart(2,'0')}:00 · {item.sampleCount.toLocaleString()} readings</span><span>{item.avgPower.toFixed(3)} kW</span></div>)}</div></article><article className="rounded-lg border border-[#29383d] bg-[#121d21] p-5"><h2 className="mb-4 font-medium">Validated target statistics (kW)</h2><dl className="space-y-3 text-sm">{Object.entries({Minimum:stats.min,Median:stats.median,Mean:stats.mean,Maximum:stats.max,'Standard deviation':stats.std}).map(([label,value])=><div key={label} className="flex justify-between"><dt className="text-[#93a7ab]">{label}</dt><dd className="font-mono">{value.toFixed(4)}</dd></div>)}</dl><p className="mt-5 text-xs text-[#93a7ab]">Source window: {new Date(quality.dateRange.start).toLocaleString()} to {new Date(quality.dateRange.end).toLocaleString()}</p></article></section>
+      <section className="mt-6 rounded-lg border border-[#29383d] bg-[#121d21] p-5"><h2 className="mb-3 font-medium">Validation: {quality.validationStatus}</h2>{quality.warnings.length ? <ul className="list-disc space-y-1 pl-5 text-sm text-[#f3bd75]">{quality.warnings.map((warning,index)=><li key={`${index}-${warning}`}>{warning}</li>)}</ul> : <p className="text-sm text-[#93a7ab]">No validation warnings were recorded.</p>}</section>
+      <p className="mt-5 text-xs text-[#6b7f84]">Power is measured in kW. This household dataset is historical and is not live telemetry.</p></div>;
+  }
   
   return (
     <div className="flex flex-col min-h-screen">
@@ -72,10 +87,11 @@ export default function DataHealthPage() {
           <span className="text-[#93a7ab] text-sm">Workspace / Data trust</span>
         </div>
         <div className="flex items-center gap-4 text-[#93a7ab] text-xs">
-          <span>SNAPSHOT 15 OCT 2026 · 00:10 UTC</span>
+          <span>VALIDATION · {healthData.quality.dateRange.start.slice(0, 10)} – {healthData.quality.dateRange.end.slice(0, 10)}</span>
           <button className="p-1.5 hover:bg-[#1a2b30] rounded"><Calendar className="w-4 h-4" /></button>
         </div>
       </header>
+      {healthData.isDemo && <div className="px-8 pt-5"><DemoDataBanner /></div>}
       
       {/* Main Content */}
       <div className="flex-1 overflow-auto px-8 py-6">
@@ -102,8 +118,8 @@ export default function DataHealthPage() {
               </svg>
             </div>
             <div>
-              <h2 className="text-[#e8f0ec] text-base font-medium">Northbank campus · Main electricity meter</h2>
-              <p className="text-[#93a7ab] text-xs">NB-01 / hourly_energy_demo.csv / v1.0</p>
+              <h2 className="text-[#e8f0ec] text-base font-medium">UCI household electricity observations</h2>
+              <p className="text-[#93a7ab] text-xs">UCI-HOUSEHOLD / household_power_consumption.txt / v1.0</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -149,7 +165,7 @@ export default function DataHealthPage() {
               <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">287</span>
               <span className="text-[#93a7ab] text-sm">days</span>
             </div>
-            <p className="text-[#93a7ab] text-[10px]">01 Jan–14 Oct 2026 · UTC</p>
+            <p className="text-[#93a7ab] text-[10px]">01 Jan–Selected data period · dataset time</p>
           </div>
         </div>
         
@@ -158,7 +174,7 @@ export default function DataHealthPage() {
           <div className="mb-4">
             <h3 className="text-[#e8f0ec] text-sm font-medium mb-1">Every hour accounted for</h3>
             <p className="text-[#93a7ab] text-xs">
-              Raw record availability · 15 Sep-14 Oct 2026 · each cell is one hour
+              Raw record availability · 15 Sep-Selected data period · each cell is one hour
             </p>
           </div>
           
@@ -196,7 +212,7 @@ export default function DataHealthPage() {
           </div>
           
           <div className="flex items-center justify-between text-[10px] text-[#6b7f84] border-t border-[#29383d] pt-3">
-            <span>UTC</span>
+            <span>dataset time</span>
             <div className="flex gap-8">
               <span>15 SEP</span>
               <span>23 SEP</span>
@@ -219,23 +235,23 @@ export default function DataHealthPage() {
           <div className="bg-[#121d21] border border-[#29383d] rounded-lg p-6">
             <div className="mb-4">
               <h3 className="text-[#e8f0ec] text-sm font-medium mb-1">From source to forecast</h3>
-              <p className="text-[#93a7ab] text-xs">Latest validated observations · timestamps are interval starts, in UTC</p>
+              <p className="text-[#93a7ab] text-xs">Latest validated observations · timestamps are interval starts, in dataset time</p>
             </div>
             
             <div className="overflow-x-auto mb-4">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-[#29383d] text-[#6b7f84] text-left">
-                    <th className="py-2 px-3 font-medium">hour_start_UTC</th>
+                    <th className="py-2 px-3 font-medium">hour_start</th>
                     <th className="py-2 px-3 font-medium">meter_id</th>
-                    <th className="py-2 px-3 font-medium text-right">consumption_kWh</th>
+                    <th className="py-2 px-3 font-medium text-right">mean_active_power_kW</th>
                     <th className="py-2 px-3 font-medium">quality_flag</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr className="border-b border-[#29383d]">
                     <td className="py-2 px-3 text-[#e8f0ec] font-mono">2026-10-14 20:00</td>
-                    <td className="py-2 px-3 text-[#93a7ab] font-mono">NB-01</td>
+                    <td className="py-2 px-3 text-[#93a7ab] font-mono">UCI-HOUSEHOLD</td>
                     <td className="py-2 px-3 text-right text-[#e8f0ec] font-mono">234.0</td>
                     <td className="py-2 px-3">
                       <span className="text-[#9cdccb] text-[10px]">Observed</span>
@@ -243,7 +259,7 @@ export default function DataHealthPage() {
                   </tr>
                   <tr className="border-b border-[#29383d]">
                     <td className="py-2 px-3 text-[#e8f0ec] font-mono">2026-10-14 21:00</td>
-                    <td className="py-2 px-3 text-[#93a7ab] font-mono">NB-01</td>
+                    <td className="py-2 px-3 text-[#93a7ab] font-mono">UCI-HOUSEHOLD</td>
                     <td className="py-2 px-3 text-right text-[#e8f0ec] font-mono">186.0</td>
                     <td className="py-2 px-3">
                       <span className="text-[#9cdccb] text-[10px]">Observed</span>
@@ -251,7 +267,7 @@ export default function DataHealthPage() {
                   </tr>
                   <tr className="border-b border-[#29383d]">
                     <td className="py-2 px-3 text-[#e8f0ec] font-mono">2026-10-14 22:00</td>
-                    <td className="py-2 px-3 text-[#93a7ab] font-mono">NB-01</td>
+                    <td className="py-2 px-3 text-[#93a7ab] font-mono">UCI-HOUSEHOLD</td>
                     <td className="py-2 px-3 text-right text-[#e8f0ec] font-mono">166.0</td>
                     <td className="py-2 px-3">
                       <span className="text-[#9cdccb] text-[10px]">Observed</span>
@@ -259,7 +275,7 @@ export default function DataHealthPage() {
                   </tr>
                   <tr>
                     <td className="py-2 px-3 text-[#e8f0ec] font-mono">2026-10-14 23:00</td>
-                    <td className="py-2 px-3 text-[#93a7ab] font-mono">NB-01</td>
+                    <td className="py-2 px-3 text-[#93a7ab] font-mono">UCI-HOUSEHOLD</td>
                     <td className="py-2 px-3 text-right text-[#e8f0ec] font-mono">150.0</td>
                     <td className="py-2 px-3">
                       <span className="text-[#9cdccb] text-[10px]">Observed</span>
@@ -319,7 +335,7 @@ export default function DataHealthPage() {
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-0.5">
                     <p className="text-[#e8f0ec] text-xs font-medium">Consumption range</p>
-                    <span className="text-[#9cdccb] text-[10px]">0-900 kWh check passed</span>
+                    <span className="text-[#9cdccb] text-[10px]">0-900 kW check passed</span>
                   </div>
                 </div>
               </div>
@@ -347,7 +363,7 @@ export default function DataHealthPage() {
             
             <div className="mt-4 pt-4 border-t border-[#29383d]">
               <p className="text-[#6b7f84] text-[10px] leading-relaxed">
-                LAST RUN · 15 Oct 2026 00:07 UTC
+                LAST RUN · Selected data period 00:07 dataset time
               </p>
             </div>
           </div>
@@ -366,7 +382,7 @@ export default function DataHealthPage() {
         
         {/* Footer */}
         <div className="mt-8 pt-4 border-t border-[#29383d] flex items-center justify-between text-[10px] text-[#6b7f84]">
-          <span>NB-01 / ELECTRICITY / HOURLY kWh / UTC</span>
+          <span>UCI-HOUSEHOLD / ELECTRICITY / HOURLY kW / dataset time</span>
           <span>Demo data · Estimates are not operational guarantees</span>
         </div>
       </div>

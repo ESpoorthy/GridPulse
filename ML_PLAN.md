@@ -1,6 +1,6 @@
 # GridPulse — Machine Learning Plan
 
-**Status:** Planning; metrics have not been measured yet.  
+**Status:** Implemented and measured on the full UCI source; current results are in [docs/ML_RESULTS.md](docs/ML_RESULTS.md).
 **Primary task:** Univariate time-series forecasting, followed by residual-based anomaly detection.
 
 ## 1. Dataset and target
@@ -22,7 +22,7 @@ Aggregate valid minute-level readings into hourly means. The prediction target i
 
 ## 3. Forecast target and horizon
 
-For each forecast origin, predict the next 24 consecutive hourly mean active-power values. Start with a one-step-ahead supervised model and generate the 24-hour trajectory recursively, adding each prediction to the history used for future lag features. Evaluate the complete 24-hour path at multiple forecast origins.
+For each forecast origin, predict the next 24 consecutive hourly mean active-power values. A one-step supervised estimator generates the path recursively, adding each prediction to the history used for future lag features. Candidate models are compared on common validation origins spaced 72 hours apart; the selected model is separately scored on the held-out recursive test windows.
 
 The recursive forecast approach must be documented because error can compound across the horizon. If it performs poorly, compare a direct multi-step strategy as a later experiment rather than quietly changing the evaluation method.
 
@@ -33,6 +33,7 @@ Candidate predictors available at a forecast origin:
 - Cyclical encodings for hour-of-day and day-of-week.
 - Historical target lags: 1, 2, 3, 24, 48 and 168 hours.
 - Historical rolling statistics over 3, 24 and 168 hours, calculated only from observations available before the prediction timestamp.
+- The validator's `valid_minutes` quality field is not a predictor because its future values are unknown at forecast time.
 
 **Leakage rule:** rolling features must be shifted so that the target hour is never included. Any imputation/scaling/selection that learns parameters from data must be fitted on training data only. Never use random train/test splitting for this time-series task.
 
@@ -47,15 +48,16 @@ Candidate predictors available at a forecast origin:
 4. **RandomForestRegressor:** nonlinear tree ensemble.
 5. **HistGradientBoostingRegressor:** gradient-boosted tree baseline.
 
-Start with the baselines and simple models. Add further models only if they provide a meaningful experiment and can be evaluated fairly. No performance numbers should appear in the README until the experiments have actually run.
+The measured candidate list remains these baselines and classical models. HistGradientBoosting was selected by recursive 24-hour validation MAE in the 2026-10-21 run. See the results report before quoting current metrics.
 
 ## 6. Validation strategy
 
 - Preserve timestamp order.
 - Begin with a chronological split of approximately 70% train, 15% validation and 15% final test, adjusted only if data quality or minimum-history requirements demand it.
 - Use rolling-origin/time-series validation on the development portion where practical.
-- Train candidate models on training data, select hyperparameters/models using validation windows, and use the final test period only for the final comparison.
-- Evaluate forecasts at multiple 24-hour origins with the same origins for each model; report both aggregate metrics and performance by forecast step (1–6, 7–12 and 13–24 hours).
+- Train candidates on the training partition and select the model using recursive validation windows; do not use the final test partition for selection.
+- Evaluate every candidate at the same complete 24-hour validation origins; report aggregate and step-group performance (1–6, 7–12 and 13–24 hours).
+- Refit each candidate on train plus validation for the one-step test comparison. Separately evaluate the selected model's recursive 24-hour path on complete test windows.
 - Record the time periods, forecast strategy, training configuration and random seed.
 
 ## 7. Evaluation metrics
@@ -67,13 +69,7 @@ Start with the baselines and simple models. Add further models only if they prov
 
 ## 8. Anomaly detection
 
-The first implementation will use model forecast residuals or deviations from a historical expected profile:
-1. Generate out-of-sample predictions on the validation period.
-2. Calculate residuals from those predictions; do not calibrate anomaly thresholds on the final test period.
-3. Estimate robust thresholds using a documented method, such as median absolute deviation (MAD), optionally stratified by hour-of-week when there is sufficient data.
-4. Apply the frozen threshold to later held-out observations.
-5. Report timestamp, observed value, expected value, absolute deviation, relative deviation where mathematically safe, and the triggering threshold.
-6. Define low/medium/high severity only after calibrating and documenting threshold rules.
+The implemented detector uses absolute 24-hour seasonal-naive validation residual quantiles (95th, 99th and 99.5th percentiles) as frozen low/medium/high thresholds. It applies those thresholds to the latest observed window, reports timestamp, observed/expected power, absolute and relative deviation where defined, and sorts events by severity then timestamp. Expected power at or below zero has no relative percentage. The thresholds do not represent calibrated probabilities.
 
 An anomaly is an **unusual pattern**, not proof of wasted electricity, equipment failure or malicious activity. False positives and false negatives must be discussed.
 
@@ -83,14 +79,14 @@ A future enhancement may show empirical error bands derived from validation resi
 
 ## 10. Reproducibility and outputs
 
-The ML pipeline should eventually expose repeatable commands to:
+The repeatable pipeline commands are:
 - validate the raw dataset and generate a data-quality summary;
 - build the hourly series and time-aware features;
 - train/evaluate candidate models;
 - save a machine-readable metrics report and selected local model artifact;
 - generate forecasts and anomaly results for the backend.
 
-Exact command names and module paths will be finalised after the repository implementation layout is created. Store generated data, model binaries and experiment runs outside version control.
+Run `python scripts/train_models.py` for validation, training, candidate comparison, report generation and selected model persistence. Run `python scripts/validate_data.py --input PATH` to validate a particular local raw file. Generated data, model binaries and reports stay outside version control.
 
 ## 11. Research and dataset references
 

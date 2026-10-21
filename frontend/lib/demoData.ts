@@ -59,6 +59,9 @@ export function getDemoOverviewData(): OverviewData {
     dailyAverage: 1.8,
     weeklyTrend: 'down',
     weeklyChange: -3.2,
+    dailyObservedHours: 24,
+    dailyExpectedHours: 24,
+    dailyCoveragePercentage: 100,
     anomalyCount: 4,
     lastUpdated: generateTimestamp(0),
     dataSource: 'Demo Data (Synthetic)',
@@ -249,6 +252,8 @@ export function getDemoModelComparisonData(): ModelComparisonData {
       end: '2010-11-26T23:00:00Z',
     },
     splitRatio: '70/15/15',
+    forecastHorizon: 1,
+    selectionMetric: 'synthetic one-step validation MAE',
     isDemo: true,
   };
 }
@@ -325,6 +330,10 @@ export function getDemoDataHealthData(): DataHealthData {
       validRows: 45890,
       missingRows: 1630,
       missingPercentage: 3.4,
+      duplicateRowsExcluded: 0,
+      timestampParseFailures: 0,
+      missingMinuteTimestamps: 1630,
+      excludedHourlyIntervals: 0,
       dateRange: {
         start: '2006-12-16T17:00:00Z',
         end: '2010-11-26T21:00:00Z',

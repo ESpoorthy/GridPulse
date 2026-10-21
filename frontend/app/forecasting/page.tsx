@@ -10,6 +10,8 @@
 import { LoadingState } from '@/components/ui/LoadingSpinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { getDemoForecastData } from '@/lib/demoData';
+import { demoModeEnabled } from '@/lib/utils';
+import { DemoDataBanner } from '@/components/ui/DemoDataBanner';
 import { fetchForecast } from '@/lib/api';
 import { ForecastData } from '@/lib/types';
 import { ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area } from 'recharts';
@@ -31,12 +33,14 @@ export default function ForecastingPage() {
         
         if (apiData) {
           setForecastData(apiData);
-        } else {
+        } else if (demoModeEnabled()) {
           setForecastData(getDemoForecastData());
+        } else {
+          setError('No trained model artifact is available. Generate it with scripts/train_models.py, or add ?demo=1 for synthetic preview data.');
         }
       } catch {
-        setError('Failed to load forecast data');
-        setForecastData(getDemoForecastData());
+        if (demoModeEnabled()) setForecastData(getDemoForecastData());
+        else setError('Could not reach the API. Add ?demo=1 to view synthetic preview data.');
       } finally {
         setLoading(false);
       }
@@ -77,6 +81,15 @@ export default function ForecastingPage() {
       upper: p.upper,
     }))
   ];
+  const predictionValues = forecastData.forecast.map((point) => point.predicted);
+  const meanPredictedPower = predictionValues.length ? predictionValues.reduce((sum, value) => sum + value, 0) / predictionValues.length : null;
+  const peakForecast = forecastData.forecast.reduce<(typeof forecastData.forecast)[number] | null>((peak, point) => !peak || point.predicted > peak.predicted ? point : peak, null);
+
+  if (!forecastData.isDemo) {
+    return <div className="min-h-screen p-6 md:p-10 text-[#e8f0ec]"><header className="mb-8 border-b border-[#29383d] pb-5"><p className="text-sm text-[#93a7ab]">GridPulse / Forecast</p><h1 className="mt-2 text-3xl">Recursive 24-hour forecast</h1><p className="mt-2 text-sm text-[#93a7ab]">Model: {forecastData.modelName} · generated {new Date(forecastData.generatedAt).toLocaleString()}</p></header>
+      <section className="mb-5 rounded-lg border border-[#29383d] bg-[#121d21] p-5"><p className="text-sm text-[#93a7ab]">Forecast origin: {new Date(forecastData.historical.at(-1)?.timestamp ?? forecastData.generatedAt).toLocaleString()}</p><p className="mt-2 text-sm">{forecastData.forecast.length} recursively generated hourly mean power predictions (kW).</p><p className="mt-2 text-xs text-[#f3bd75]">The selected model&apos;s held-out recursive 24-hour evaluation is reported on the Models screen. Prediction intervals are unavailable.</p></section>
+      <section className="overflow-x-auto rounded-lg border border-[#29383d] bg-[#121d21] p-5"><table className="w-full text-left text-sm"><thead className="text-[#93a7ab]"><tr><th className="p-2">Timestamp</th><th className="p-2">Predicted mean power (kW)</th><th className="p-2">Lower interval</th><th className="p-2">Upper interval</th></tr></thead><tbody>{forecastData.forecast.map(point=><tr key={point.timestamp} className="border-t border-[#29383d]"><td className="p-2">{new Date(point.timestamp).toLocaleString()}</td><td className="p-2 font-mono">{point.predicted.toFixed(4)}</td><td className="p-2">{point.lower == null?'Unavailable':`${point.lower.toFixed(4)} kW`}</td><td className="p-2">{point.upper == null?'Unavailable':`${point.upper.toFixed(4)} kW`}</td></tr>)}</tbody></table></section></div>;
+  }
   
   return (
     <div className="flex flex-col min-h-screen">
@@ -86,10 +99,11 @@ export default function ForecastingPage() {
           <span className="text-[#93a7ab] text-sm">Workspace / Forecast</span>
         </div>
         <div className="flex items-center gap-4 text-[#93a7ab] text-xs">
-          <span>SNAPSHOT 15 OCT 2026 · 00:10 UTC</span>
+          <span>GENERATED · {new Date(forecastData.generatedAt).toLocaleString()}</span>
           <button className="p-1.5 hover:bg-[#1a2b30] rounded"><Calendar className="w-4 h-4" /></button>
         </div>
       </header>
+      {forecastData.isDemo && <div className="px-8 pt-5"><DemoDataBanner /></div>}
       
       {/* Main Content */}
       <div className="flex-1 overflow-auto px-8 py-6">
@@ -110,20 +124,20 @@ export default function ForecastingPage() {
         {/* Model Selection Controls */}
         <div className="flex items-center gap-3 mb-6">
           <button className="bg-[#18252a] border border-[#29383d] px-3 py-2 rounded text-[#e8f0ec] text-xs flex items-center gap-2">
-            LightGBM v2.4
+            {forecastData.modelName}
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </button>
           <button className="bg-[#18252a] border border-[#29383d] px-3 py-2 rounded text-[#e8f0ec] text-xs flex items-center gap-2">
             <Calendar className="w-3 h-3" />
-            15 Oct 2026 · 24 hours
+            {forecastData.horizon} hours · forecast starts {forecastData.forecast[0]?.timestamp.slice(0, 16) ?? 'unavailable'}
           </button>
           <button className="bg-[#18252a] border border-[#29383d] px-3 py-2 rounded text-[#e8f0ec] text-xs">
-            90% interval
+            Interval unavailable
           </button>
           <div className="ml-auto flex items-center gap-2">
-            <span className="bg-[#bcf58a] text-[#0c1215] text-[9px] font-bold px-2 py-0.5 rounded uppercase">DEMO</span>
+            {forecastData.isDemo && <span className="bg-[#bcf58a] text-[#0c1215] text-[9px] font-bold px-2 py-0.5 rounded uppercase">DEMO</span>}
             <span className="bg-[#b9adff] bg-opacity-20 border border-[#b9adff] border-opacity-30 text-[#b9adff] text-[9px] font-bold px-2 py-1 rounded uppercase">
               FORECAST READY
             </span>
@@ -133,39 +147,37 @@ export default function ForecastingPage() {
         {/* Summary KPIs */}
         <div className="grid grid-cols-4 gap-4 mb-6">
           <div className="bg-[#121d21] border border-[#29383d] rounded-lg p-5">
-            <p className="text-[#93a7ab] text-[11px] mb-2">Predicted daily consumption</p>
+            <p className="text-[#93a7ab] text-[11px] mb-2">Mean predicted power</p>
             <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">4,796</span>
-              <span className="text-[#93a7ab] text-sm">kWh</span>
+              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">{meanPredictedPower?.toFixed(3) ?? '—'}</span>
+              <span className="text-[#93a7ab] text-sm">kW</span>
             </div>
-            <p className="text-[#93a7ab] text-[10px]">Sum of 24 hourly point predictions</p>
+            <p className="text-[#93a7ab] text-[10px]">Average of available forecast points</p>
           </div>
           
           <div className="bg-[#121d21] border border-[#29383d] rounded-lg p-5">
-            <p className="text-[#93a7ab] text-[11px] mb-2">Change vs 14 October</p>
+            <p className="text-[#93a7ab] text-[11px] mb-2">Forecast points available</p>
             <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">−4.4</span>
-              <span className="text-[#93a7ab] text-sm">%</span>
+              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">{predictionValues.length}</span>
             </div>
-            <p className="text-[#93a7ab] text-[10px]">220 kWh below the observed day</p>
+            <p className="text-[#93a7ab] text-[10px]">Requested horizon: {forecastData.horizon} hours</p>
           </div>
           
           <div className="bg-[#121d21] border border-[#29383d] rounded-lg p-5">
-            <p className="text-[#93a7ab] text-[11px] mb-2">Predicted peak · 18:00</p>
+            <p className="text-[#93a7ab] text-[11px] mb-2">Maximum forecast power</p>
             <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">286</span>
-              <span className="text-[#93a7ab] text-sm">kWh</span>
+              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">{peakForecast?.predicted.toFixed(3) ?? '—'}</span>
+              <span className="text-[#93a7ab] text-sm">kW</span>
             </div>
-            <p className="text-[#93a7ab] text-[10px]">90% interval: 244-328 kWh</p>
+            <p className="text-[#93a7ab] text-[10px]">{peakForecast ? new Date(peakForecast.timestamp).toLocaleString() : 'Not available'}</p>
           </div>
           
           <div className="bg-[#121d21] border border-[#29383d] rounded-lg p-5">
-            <p className="text-[#93a7ab] text-[11px] mb-2">Hold-out mean absolute error</p>
+            <p className="text-[#93a7ab] text-[11px] mb-2">Calibrated prediction interval</p>
             <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-[#e8f0ec] text-[32px] font-mono leading-none">12.8</span>
-              <span className="text-[#93a7ab] text-sm">kWh</span>
+              <span className="text-[#e8f0ec] text-[20px] font-mono leading-none">Unavailable</span>
             </div>
-            <p className="text-[#93a7ab] text-[10px]">01-14 Oct · hourly error, 24h horizon</p>
+            <p className="text-[#93a7ab] text-[10px]">No interval calibration is published.</p>
           </div>
         </div>
         
@@ -174,7 +186,7 @@ export default function ForecastingPage() {
           <div className="mb-4">
             <h2 className="text-[#e8f0ec] text-sm font-medium mb-1">From measured to modeled</h2>
             <p className="text-[#93a7ab] text-[11px]">
-              12 hours of observed context → 24 hourly forecasts for 15 October
+              {forecastData.historical.length} historical readings → {forecastData.forecast.length} recursively generated predictions. One-step test metrics do not establish 24-hour accuracy.
             </p>
           </div>
           
@@ -208,7 +220,7 @@ export default function ForecastingPage() {
                   tick={{ fill: '#6b7f84', fontSize: 10 }}
                   stroke="#29383d"
                   tickLine={false}
-                  label={{ value: 'kWh', angle: 0, position: 'top', fill: '#6b7f84', fontSize: 10, offset: 10 }}
+                  label={{ value: 'kW', angle: 0, position: 'top', fill: '#6b7f84', fontSize: 10, offset: 10 }}
                 />
                 <Tooltip 
                   contentStyle={{ 
@@ -257,7 +269,7 @@ export default function ForecastingPage() {
             <span>The shaded range is a pointwise 90% prediction interval. It is not an interval for the daily total.</span>
           </div>
           
-          <p className="text-[#6b7f84] text-[9px] text-right mt-2">ISSUED 15 OCT · 00:08 UTC</p>
+          <p className="text-[#6b7f84] text-[9px] text-right mt-2">Generated {new Date(forecastData.generatedAt).toLocaleString()}</p>
         </div>
         
         {/* Hourly Outlook & Model Details */}
@@ -275,7 +287,7 @@ export default function ForecastingPage() {
             
             <div className="space-y-0">
               <div className="grid grid-cols-[100px_1fr_1fr_1fr] gap-4 py-2 text-[10px] text-[#6b7f84] border-b border-[#29383d]">
-                <div>Hour · UTC</div>
+                <div>Hour · dataset time</div>
                 <div className="text-right">Forecast</div>
                 <div className="text-right">Lower 90%</div>
                 <div className="text-right">Upper 90%</div>
@@ -292,9 +304,9 @@ export default function ForecastingPage() {
                     {new Date(point.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                     {idx === 4 && ' · peak'}
                   </div>
-                  <div className="text-[#e8f0ec] text-right font-mono">{(point.predicted ?? 0).toFixed(0)} kWh</div>
-                  <div className="text-[#93a7ab] text-right font-mono">{point.lower?.toFixed(0) || 'N/A'} kWh</div>
-                  <div className="text-[#93a7ab] text-right font-mono">{point.upper?.toFixed(0) || 'N/A'} kWh</div>
+                  <div className="text-[#e8f0ec] text-right font-mono">{(point.predicted ?? 0).toFixed(0)} kW</div>
+                  <div className="text-[#93a7ab] text-right font-mono">{point.lower?.toFixed(3) ?? 'Unavailable'} {point.lower == null ? '' : 'kW'}</div>
+                  <div className="text-[#93a7ab] text-right font-mono">{point.upper?.toFixed(3) ?? 'Unavailable'} {point.upper == null ? '' : 'kW'}</div>
                 </div>
               ))}
             </div>
@@ -329,7 +341,7 @@ export default function ForecastingPage() {
         
         {/* Footer */}
         <div className="mt-8 pt-4 border-t border-[#29383d] flex items-center justify-between text-[10px] text-[#6b7f84]">
-          <span>NB-01 / ELECTRICITY / HOURLY kWh / UTC</span>
+          <span>UCI-HOUSEHOLD / ELECTRICITY / HOURLY kW / dataset time</span>
           <span>Demo data · Estimates are not operational guarantees</span>
         </div>
       </div>
