@@ -12,6 +12,11 @@ export function cn(...inputs: ClassValue[]) {
   return clsx(inputs);
 }
 
+/** Synthetic fixtures are available only when a user explicitly opts in with ?demo=1. */
+export function demoModeEnabled(): boolean {
+  return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === '1';
+}
+
 /**
  * Format a number to specified decimal places.
  */

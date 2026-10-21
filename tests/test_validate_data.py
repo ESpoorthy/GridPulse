@@ -60,7 +60,8 @@ def test_inspection_reports_missing_values_duplicates_and_hourly_bins(tmp_path: 
     assert report["hourly_aggregation"]["eligible_hours"] == 1
     assert len(hourly) == 1
     assert hourly.loc[0, "global_active_power_mean_kw"] == pytest.approx(1.0)
-    assert int(hourly.loc[0, "valid_minutes"]) == 61
+    assert int(hourly.loc[0, "valid_minutes"]) == 60
+    assert report["duplicate_rows_excluded_from_aggregation"] == 1
 
 
 def test_rejects_wrong_schema(tmp_path: Path) -> None:
@@ -70,6 +71,19 @@ def test_rejects_wrong_schema(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="missing columns"):
         inspect_dataset(source, expected_rows=None)
+
+
+def test_reports_missing_minute_timestamps_and_non_minute_gap(tmp_path: Path) -> None:
+    source = tmp_path / "gap.txt"
+    start = datetime(2007, 1, 1)
+    with source.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file, delimiter=";")
+        writer.writerow(HEADER)
+        writer.writerow(_row(start, "1.0"))
+        writer.writerow(_row(start + timedelta(minutes=2), "1.0"))
+    report, _ = inspect_dataset(source, expected_rows=None, min_valid_minutes_per_hour=1)
+    assert report["missing_minute_timestamps_in_range"] == 1
+    assert report["non_minute_timestamp_gap_count"] == 1
 
 
 def test_missing_file_has_actionable_error(tmp_path: Path) -> None:

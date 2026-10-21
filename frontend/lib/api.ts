@@ -1,8 +1,8 @@
 /**
  * API client for GridPulse backend.
  * 
- * Fetches real data from FastAPI backend when available,
- * falls back to demo data when backend is not running.
+ * Fetches real data from FastAPI. Synthetic fixtures are selected explicitly
+ * by the page only when the URL contains ?demo=1.
  */
 
 import {
@@ -21,7 +21,7 @@ interface ApiAnomalyEvent {
   timestamp: string;
   observed_power?: number;
   expected_power?: number;
-  deviation?: number;
+  deviation?: number | null;
   severity: 'low' | 'medium' | 'high';
   reason: string;
   confidence?: number;
@@ -52,6 +52,14 @@ interface ApiModelMetrics {
   test_samples: number;
   training_time?: number;
   is_baseline: boolean;
+  recursive_validation?: {
+    mae: number;
+    rmse: number;
+    forecast_origins: number;
+    evaluated_hours: number;
+    evaluation_period: { start: string; end: string };
+    step_group_metrics: Record<string, { mae: number; rmse: number }>;
+  } | null;
 }
 
 interface ApiModelComparisonData {
@@ -63,6 +71,9 @@ interface ApiModelComparisonData {
   };
   split_ratio: string;
   is_demo: boolean;
+  forecast_horizon: number;
+  selection_metric: string;
+  recursive_test?: ModelComparisonData['recursiveTest'];
 }
 
 interface ApiDataHealthData {
@@ -73,6 +84,10 @@ interface ApiDataHealthData {
     valid_rows: number;
     missing_rows: number;
     missing_percentage: number;
+    duplicate_rows_excluded: number;
+    timestamp_parse_failures: number;
+    missing_minute_timestamps: number;
+    excluded_hourly_intervals: number;
     date_range: {
       start: string;
       end: string;
@@ -105,6 +120,9 @@ interface ApiOverviewData {
   daily_average: number;
   weekly_trend: 'up' | 'down' | 'stable';
   weekly_change: number;
+  daily_observed_hours: number;
+  daily_expected_hours: number;
+  daily_coverage_percentage: number;
   anomaly_count: number;
   last_updated: string;
   data_source: string;
@@ -192,6 +210,14 @@ export async function fetchModelMetrics(): Promise<ModelComparisonData | null> {
       testSamples: model.test_samples ?? 0,
       trainingTime: model.training_time,
       isBaseline: model.is_baseline ?? false,
+      recursiveValidation: model.recursive_validation ? {
+        mae: model.recursive_validation.mae,
+        rmse: model.recursive_validation.rmse,
+        forecastOrigins: model.recursive_validation.forecast_origins,
+        evaluatedHours: model.recursive_validation.evaluated_hours,
+        evaluationPeriod: model.recursive_validation.evaluation_period,
+        stepGroupMetrics: model.recursive_validation.step_group_metrics,
+      } : null,
     })),
     bestModel: data.best_model ?? '',
     evaluationPeriod: {
@@ -199,6 +225,9 @@ export async function fetchModelMetrics(): Promise<ModelComparisonData | null> {
       end: data.evaluation_period?.end ?? '',
     },
     splitRatio: data.split_ratio ?? '',
+    forecastHorizon: data.forecast_horizon ?? 1,
+    selectionMetric: data.selection_metric ?? 'one-step validation MAE',
+    recursiveTest: data.recursive_test ?? null,
     isDemo: data.is_demo ?? false,
   };
 }
@@ -220,6 +249,10 @@ export async function fetchDataHealth(): Promise<DataHealthData | null> {
       validRows: data.quality?.valid_rows ?? 0,
       missingRows: data.quality?.missing_rows ?? 0,
       missingPercentage: data.quality?.missing_percentage ?? 0,
+      duplicateRowsExcluded: data.quality?.duplicate_rows_excluded ?? 0,
+      timestampParseFailures: data.quality?.timestamp_parse_failures ?? 0,
+      missingMinuteTimestamps: data.quality?.missing_minute_timestamps ?? 0,
+      excludedHourlyIntervals: data.quality?.excluded_hourly_intervals ?? 0,
       dateRange: {
         start: data.quality?.date_range?.start ?? '',
         end: data.quality?.date_range?.end ?? '',
@@ -262,6 +295,9 @@ export async function fetchOverview(): Promise<OverviewData | null> {
     dailyAverage: data.daily_average ?? 0,
     weeklyTrend: data.weekly_trend ?? 'stable',
     weeklyChange: data.weekly_change ?? 0,
+    dailyObservedHours: data.daily_observed_hours ?? 0,
+    dailyExpectedHours: data.daily_expected_hours ?? 0,
+    dailyCoveragePercentage: data.daily_coverage_percentage ?? 0,
     anomalyCount: data.anomaly_count ?? 0,
     lastUpdated: data.last_updated ?? new Date().toISOString(),
     dataSource: data.data_source ?? 'Unknown',
@@ -316,7 +352,7 @@ export async function fetchAnomalies(): Promise<AnomalyData | null> {
       timestamp: event.timestamp,
       observedPower: event.observed_power ?? 0,
       expectedPower: event.expected_power ?? 0,
-      deviation: event.deviation ?? 0,
+      deviation: event.deviation ?? null,
       severity: event.severity,
       reason: event.reason,
       confidence: event.confidence,

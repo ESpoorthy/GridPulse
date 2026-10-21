@@ -24,6 +24,7 @@ COLUMNS = [
 ]
 NUMERIC_COLUMNS = COLUMNS[2:]
 TARGET = "Global_active_power"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def inspect_dataset(
@@ -35,6 +36,8 @@ def inspect_dataset(
 ) -> tuple[dict[str, Any], pd.DataFrame]:
     """Inspect source rows in chunks and return a quality report plus hourly data."""
     path = Path(input_path)
+    if not path.is_absolute():
+        path = REPOSITORY_ROOT / path
     if not path.is_file():
         raise FileNotFoundError(
             f"Dataset not found: {path}. Download the file from the official UCI "
@@ -49,11 +52,15 @@ def inspect_dataset(
     bad_timestamps = 0
     missing_values = dict.fromkeys(NUMERIC_COLUMNS, 0)
     numeric_parse_errors = dict.fromkeys(NUMERIC_COLUMNS, 0)
+    negative_measurements = dict.fromkeys(NUMERIC_COLUMNS, 0)
+    high_active_power_count = 0
     negative_target_count = 0
     timestamp_arrays: list[np.ndarray] = []
     hourly_parts: list[pd.DataFrame] = []
     chronological = True
     previous_timestamp: pd.Timestamp | None = None
+    seen_timestamps: set[pd.Timestamp] = set()
+    duplicate_rows_excluded = 0
     target_min: float | None = None
     target_max: float | None = None
 
@@ -83,6 +90,15 @@ def inspect_dataset(
         bad_timestamps += int(timestamp.isna().sum())
         timestamp_arrays.append(timestamp.to_numpy(dtype="datetime64[ns]"))
 
+        # Keep only the first source row for each valid timestamp. This policy
+        # is deterministic across chunk boundaries and prevents duplicate
+        # records from increasing a minute's weight in an hourly mean.
+        duplicate_mask = timestamp.notna() & (
+            timestamp.isin(seen_timestamps) | timestamp.duplicated(keep="first")
+        )
+        duplicate_rows_excluded += int(duplicate_mask.sum())
+        seen_timestamps.update(pd.Timestamp(value) for value in timestamp.dropna())
+
         valid_timestamp = timestamp.dropna()
         if not valid_timestamp.empty:
             if not valid_timestamp.is_monotonic_increasing:
@@ -102,13 +118,17 @@ def inspect_dataset(
 
         target = numbers[TARGET]
         negative_target_count += int((target < 0).sum())
+        for name in NUMERIC_COLUMNS:
+            negative_measurements[name] += int((numbers[name] < 0).sum())
+        high_active_power_count += int((target > 20).sum())
         observed = target.dropna()
         if not observed.empty:
             chunk_min, chunk_max = float(observed.min()), float(observed.max())
             target_min = chunk_min if target_min is None else min(target_min, chunk_min)
             target_max = chunk_max if target_max is None else max(target_max, chunk_max)
 
-        aggregation = pd.DataFrame({"hour": timestamp.dt.floor("h"), "target": target})
+        target_for_aggregation = target.mask(duplicate_mask)
+        aggregation = pd.DataFrame({"hour": timestamp.dt.floor("h"), "target": target_for_aggregation})
         aggregation = aggregation.dropna(subset=["hour", "target"])
         if not aggregation.empty:
             hourly_parts.append(
@@ -124,6 +144,11 @@ def inspect_dataset(
         raise ValueError("No timestamps could be parsed; check date/time formats.")
 
     hour_index = pd.date_range(timestamps.min().floor("h"), timestamps.max().floor("h"), freq="h")
+    unique_timestamp_count = int(timestamps.nunique())
+    ordered_unique = timestamps.unique().sort_values()
+    minute_deltas = pd.Series(ordered_unique).diff().dropna()
+    missing_minute_count = max(0, int((timestamps.max() - timestamps.min()) / pd.Timedelta(minutes=1)) + 1 - unique_timestamp_count)
+    non_minute_gap_count = int((minute_deltas != pd.Timedelta(minutes=1)).sum())
     if hourly_parts:
         grouped = pd.concat(hourly_parts, ignore_index=True).groupby("hour")[["total", "valid_minutes"]].sum()
         grouped = grouped.reindex(hour_index, fill_value=0)
@@ -140,12 +165,15 @@ def inspect_dataset(
     }).reset_index(drop=True)
 
     matches_expected = expected_rows is None or rows == expected_rows
-    duplicate_count = int(timestamps.duplicated().sum())
+    duplicate_count = duplicate_rows_excluded
     report: dict[str, Any] = {
         "dataset_name": "UCI Individual Household Electric Power Consumption",
         "input_file": path.name,
         "file_size_bytes": path.stat().st_size,
         "row_count": rows,
+        "valid_timestamp_rows": rows - bad_timestamps,
+        "non_missing_target_rows": rows - missing_values[TARGET] - numeric_parse_errors[TARGET],
+        "unique_valid_timestamps": unique_timestamp_count,
         "expected_row_count": expected_rows,
         "row_count_matches_expected": matches_expected,
         "required_columns": COLUMNS,
@@ -154,11 +182,17 @@ def inspect_dataset(
         "timestamp_parse_failures": bad_timestamps,
         "timestamps_chronological": chronological,
         "duplicate_timestamp_count": duplicate_count,
+        "duplicate_rows_excluded_from_aggregation": duplicate_rows_excluded,
         "first_timestamp": timestamps.min().isoformat(),
         "last_timestamp": timestamps.max().isoformat(),
         "global_active_power_min_kw": target_min,
         "global_active_power_max_kw": target_max,
         "negative_active_power_value_count": negative_target_count,
+        "negative_measurement_counts": negative_measurements,
+        "active_power_above_20_kw_count": high_active_power_count,
+        "missing_minute_timestamps_in_range": missing_minute_count,
+        "non_minute_timestamp_gap_count": non_minute_gap_count,
+        "missing_hour_intervals_in_time_range": int(len(hour_index) - timestamps.floor("h").nunique()),
         "hourly_aggregation": {
             "minimum_valid_minutes_per_hour": min_valid_minutes_per_hour,
             "hourly_bins_in_time_range": len(hour_index),
@@ -179,12 +213,22 @@ def inspect_dataset(
     if not chronological:
         warnings.append("Input timestamps are not in chronological order.")
     if duplicate_count:
-        warnings.append(f"{duplicate_count} duplicate timestamp(s) detected.")
+        warnings.append(
+            f"{duplicate_count} duplicate row(s) detected; only the first row for each timestamp was used in hourly aggregation."
+        )
     parse_error_total = sum(numeric_parse_errors.values())
     if parse_error_total:
         warnings.append(f"{parse_error_total} non-missing numeric value(s) could not be parsed.")
     if negative_target_count:
         warnings.append(f"{negative_target_count} negative active-power value(s) need inspection.")
+    if any(negative_measurements.values()):
+        warnings.append("Negative numeric measurement values detected; observations were retained for inspection.")
+    if high_active_power_count:
+        warnings.append(f"{high_active_power_count} active-power value(s) above 20 kW need inspection.")
+    if missing_minute_count:
+        warnings.append(f"{missing_minute_count} expected minute timestamp(s) are absent from the covered range.")
+    if non_minute_gap_count:
+        warnings.append(f"{non_minute_gap_count} gap(s) between unique timestamps are not exactly one minute.")
     if any(missing_values.values()):
         warnings.append("Missing numeric readings detected; this script does not impute them.")
 
@@ -195,7 +239,7 @@ def inspect_dataset(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate UCI household power data.")
-    parser.add_argument("--input", default="data/raw/household_power_consumption.txt")
+    parser.add_argument("--input", default=str(REPOSITORY_ROOT / "data/raw/household_power_consumption.txt"))
     parser.add_argument("--min-valid-minutes-per-hour", type=int, default=45)
     parser.add_argument(
         "--expected-rows",
@@ -203,8 +247,8 @@ def main() -> int:
         default=EXPECTED_ROWS,
         help="Set to 0 to disable the expected row-count comparison.",
     )
-    parser.add_argument("--report-out", default="reports/generated/dataset_validation.json")
-    parser.add_argument("--hourly-out", default="data/processed/hourly_power.csv")
+    parser.add_argument("--report-out", default=str(REPOSITORY_ROOT / "reports/generated/dataset_validation.json"))
+    parser.add_argument("--hourly-out", default=str(REPOSITORY_ROOT / "data/processed/hourly_power.csv"))
     args = parser.parse_args()
 
     try:
@@ -213,10 +257,12 @@ def main() -> int:
             min_valid_minutes_per_hour=args.min_valid_minutes_per_hour,
             expected_rows=None if args.expected_rows == 0 else args.expected_rows,
         )
-    except (OSError, ValueError, pd.errors.ParserError) as exc:
+    except (OSError, ValueError, pd.errors.ParserError, pd.errors.EmptyDataError) as exc:
         parser.error(str(exc))
 
     report_path, hourly_path = Path(args.report_out), Path(args.hourly_out)
+    report_path = report_path if report_path.is_absolute() else REPOSITORY_ROOT / report_path
+    hourly_path = hourly_path if hourly_path.is_absolute() else REPOSITORY_ROOT / hourly_path
     report_path.parent.mkdir(parents=True, exist_ok=True)
     hourly_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")

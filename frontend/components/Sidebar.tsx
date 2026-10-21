@@ -30,7 +30,6 @@ const navItems = [
     name: 'Anomalies',
     href: '/anomalies',
     icon: AlertTriangle,
-    badge: 3,
   },
   {
     name: 'Models',
@@ -60,14 +59,14 @@ export function Sidebar() {
         <p className="text-[#93a7ab] text-xs">Energy, Decoded.</p>
       </div>
       
-      {/* Workspace Selector */}
+      {/* Dataset identity */}
       <div className="bg-[#121d21] border border-[#29383d] rounded-lg px-3 py-2.5 flex items-center gap-2">
         <div className="bg-[#2a3d44] rounded-full w-6 h-6 flex items-center justify-center text-[#bcf58a] text-xs font-semibold">
-          N
+          U
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[#e8f0ec] text-xs font-medium truncate">Northbank campus</p>
-          <p className="text-[#6b7f84] text-[10px]">Main meter · NB-01</p>
+          <p className="text-[#e8f0ec] text-xs font-medium truncate">UCI household</p>
+          <p className="text-[#6b7f84] text-[10px]">Historical power dataset</p>
         </div>
         <svg className="w-4 h-4 text-[#6b7f84] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
@@ -95,43 +94,26 @@ export function Sidebar() {
               >
                 <Icon className="w-4 h-4" />
                 <span className="font-medium">{item.name}</span>
-                {item.badge && (
-                  <span className="ml-auto bg-[#f3bd75] text-[#0c1215] text-[10px] font-semibold px-1.5 py-0.5 rounded">
-                    {item.badge}
-                  </span>
-                )}
               </Link>
             );
           })}
         </div>
       </nav>
       
-      {/* Demo Environment Badge */}
+      {/* Dataset context */}
       <div className="mt-auto">
         <div className="bg-[#1a2b30] border border-[#29383d] rounded-lg px-3 py-2.5">
           <div className="flex items-start gap-2 mb-1">
-            <span className="bg-[#bcf58a] text-[#0c1215] text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">
-              DEMO ENVIRONMENT
+            <span className="bg-[#2a3d44] text-[#9cdccb] text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">
+              2006–2010 DATA
             </span>
           </div>
           <p className="text-[#93a7ab] text-[10px] leading-relaxed">
-            Illustrative energy data. No live meter connection.
+            One household in Sceaux, France. No live meter connection.
           </p>
         </div>
       </div>
       
-      {/* User Profile */}
-      <div className="border-t border-[#29383d] pt-4">
-        <div className="flex items-center gap-2 px-2">
-          <div className="bg-[#2a3d44] rounded-full w-6 h-6 flex items-center justify-center text-[#bcf58a] text-xs font-semibold">
-            AL
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-[#e8f0ec] text-xs font-medium">Alex Lin</p>
-            <p className="text-[#6b7f84] text-[10px]">Energy analyst</p>
-          </div>
-        </div>
-      </div>
     </aside>
   );
 }

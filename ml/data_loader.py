@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+import ssl
 import sys
 import zipfile
 from pathlib import Path
@@ -19,20 +20,23 @@ from typing import Any
 from urllib.request import urlopen
 
 import pandas as pd
+import certifi
 
 from ml.evaluation import chronological_split
 from ml.features import build_features
 
 # Official UCI dataset metadata
 UCI_DATASET_URL = "https://archive.ics.uci.edu/static/public/235/individual+household+electric+power+consumption.zip"
-UCI_ZIP_MD5 = "1f112f6e363c07792e635a3c5b0a3622"  # MD5 of the ZIP file
+# SHA-256 of the current ZIP at UCI's official static dataset URL. The old
+# repository MD5 no longer matches the archive served by that endpoint.
+UCI_ZIP_SHA256 = "9f84b46ade8a2d8e1286ec4b2b6c2987a45a755c59f263be3b3b3d10dfbda3ff"
 EXPECTED_TXT_FILENAME = "household_power_consumption.txt"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def download_uci_dataset(
-    output_dir: str | Path = "data/raw",
+    output_dir: str | Path = REPOSITORY_ROOT / "data/raw",
     *,
-    verify_md5: bool = True,
     force: bool = False,
 ) -> Path:
     """
@@ -45,8 +49,6 @@ def download_uci_dataset(
     ----------
     output_dir : str or Path, default "data/raw"
         Directory where the extracted dataset file will be saved.
-    verify_md5 : bool, default True
-        If True, verify the downloaded ZIP file's MD5 checksum.
     force : bool, default False
         If True, re-download even if the file already exists.
     
@@ -58,7 +60,7 @@ def download_uci_dataset(
     Raises
     ------
     RuntimeError
-        If download fails, MD5 verification fails, or extraction fails.
+        If download fails, SHA-256 verification fails, or extraction fails.
     
     Examples
     --------
@@ -73,6 +75,8 @@ def download_uci_dataset(
     - Expected file: household_power_consumption.txt (2,075,259 rows)
     """
     output_path = Path(output_dir)
+    if not output_path.is_absolute():
+        output_path = REPOSITORY_ROOT / output_path
     output_path.mkdir(parents=True, exist_ok=True)
     
     dataset_file = output_path / EXPECTED_TXT_FILENAME
@@ -90,7 +94,8 @@ def download_uci_dataset(
     zip_path = output_path / "household_power_consumption.zip"
     
     try:
-        with urlopen(UCI_DATASET_URL) as response:
+        tls_context = ssl.create_default_context(cafile=certifi.where())
+        with urlopen(UCI_DATASET_URL, timeout=60, context=tls_context) as response:
             total_size = int(response.headers.get('content-length', 0))
             
             with open(zip_path, 'wb') as f:
@@ -112,30 +117,25 @@ def download_uci_dataset(
         print()  # Newline after progress
         print(f"Download complete: {zip_path}")
         
-        # Verify MD5 checksum
-        if verify_md5:
-            print("Verifying MD5 checksum...")
-            md5_hash = hashlib.md5()
-            with open(zip_path, 'rb') as f:
-                for chunk in iter(lambda: f.read(8192), b""):
-                    md5_hash.update(chunk)
-            
-            actual_md5 = md5_hash.hexdigest()
-            if actual_md5 != UCI_ZIP_MD5:
-                raise RuntimeError(
-                    f"MD5 checksum mismatch!\n"
-                    f"Expected: {UCI_ZIP_MD5}\n"
-                    f"Got:      {actual_md5}\n"
-                    f"The download may be corrupted. Try again with force=True."
-                )
-            print(f"[OK] MD5 checksum verified")
+        print("Verifying SHA-256 checksum...")
+        sha256 = hashlib.sha256()
+        with zip_path.open("rb") as archive_file:
+            for chunk in iter(lambda: archive_file.read(8192), b""):
+                sha256.update(chunk)
+        actual_sha256 = sha256.hexdigest()
+        if actual_sha256 != UCI_ZIP_SHA256:
+            raise RuntimeError(
+                f"SHA-256 checksum mismatch. Expected {UCI_ZIP_SHA256}; got {actual_sha256}. "
+                "The official archive may have changed; verify its integrity before updating the pinned digest."
+            )
+        print("[OK] SHA-256 checksum verified")
         
         # Extract the dataset file
         print("Extracting dataset...")
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             # List contents to find the target file
             members = zip_ref.namelist()
-            txt_members = [m for m in members if m.endswith('.txt')]
+            txt_members = [m for m in members if Path(m).name == EXPECTED_TXT_FILENAME]
             
             if not txt_members:
                 raise RuntimeError(
@@ -147,7 +147,9 @@ def download_uci_dataset(
             print(f"Extracting: {target_member}")
             
             # Extract to output directory
-            zip_ref.extract(target_member, output_path)
+            # Extract only the expected file, without trusting archive paths.
+            with zip_ref.open(target_member) as source, dataset_file.open("wb") as destination:
+                shutil.copyfileobj(source, destination)
             
             # Rename if necessary
             extracted_path = output_path / target_member
@@ -170,7 +172,7 @@ def download_uci_dataset(
 
 
 def load_hourly_data(
-    csv_path: str | Path = "data/processed/hourly_power.csv",
+    csv_path: str | Path = REPOSITORY_ROOT / "data/processed/hourly_power.csv",
     *,
     timestamp_col: str = "timestamp",
     target_col: str = "global_active_power_mean_kw",
@@ -217,6 +219,8 @@ def load_hourly_data(
     This validates the raw data and produces the hourly aggregates.
     """
     path = Path(csv_path)
+    if not path.is_absolute():
+        path = REPOSITORY_ROOT / path
     
     if not path.exists():
         raise FileNotFoundError(
@@ -331,7 +335,7 @@ def prepare_for_training(
     # Get feature column names (exclude timestamp and target)
     feature_cols = [
         col for col in features_df.columns 
-        if col not in [timestamp_col, target_col]
+        if col not in [timestamp_col, target_col, "valid_minutes"]
     ]
     
     # Split chronologically

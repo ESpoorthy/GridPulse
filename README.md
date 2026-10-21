@@ -1,140 +1,74 @@
 # GridPulse
 
-**ML-powered household energy forecasting, anomaly detection, and explainable consumption analytics.**
+**Energy, Decoded.** GridPulse analyzes historical household electricity readings, compares classical one-step forecasting models, identifies unusual power observations, and presents dataset quality in a five-screen dashboard.
 
-GridPulse turns historical electricity readings into a transparent 24-hour demand forecast, unusual-usage signals, and model-performance insights. It is being developed as a B.Tech Machine Learning project with an emphasis on sound evaluation, reproducibility, and an interactive product experience.
+## What works today
 
-> **Project status:** Planning and dataset-validation phase. Model metrics and performance claims will be added only after experiments have run.
+- Chunked validation and minute-to-hour aggregation for the UCI Individual Household Electric Power Consumption dataset.
+- Persistence and seasonal-naive baselines plus Linear Regression, Random Forest, and HistGradientBoostingRegressor.
+- Chronological train/validation/test partitions. Candidates are selected by recursive 24-hour validation MAE over fixed origins every 72 hours; final one-step comparisons use the held-out test partition after refitting on train plus validation.
+- Saved selected-model artifact, 24-step recursive forecast endpoint, and separate held-out recursive 24-hour evaluation with errors by horizon group.
+- FastAPI endpoints for overview, forecast, anomalies, model metrics, and dataset health.
+- Next.js dashboard with synthetic data available only through an explicit `?demo=1` opt-in.
 
-## What GridPulse aims to do
+The source data is one household in Sceaux, France, measured from 2006 to 2010. It is not live telemetry or grid-wide demand. The target is hourly mean active power in **kW**. See [dataset notes](docs/DATASET.md) and [implementation status](docs/IMPLEMENTATION_STATUS.md).
 
-- Forecast the next 24 hourly average active-power values.
-- Compare classical ML models against simple persistence and seasonal-naive baselines.
-- Flag potentially unusual consumption patterns using a documented baseline and validation-calibrated thresholds.
-- Explain forecasts and anomaly signals with historical context and feature-importance analysis where appropriate.
-- Surface dataset quality, missing readings, time coverage and evaluation metrics in a responsive dashboard.
+On the held-out period, HistGradientBoosting achieved 0.3180 kW one-step test MAE (0.4625 RMSE) and 0.4427 kW recursive 24-hour test MAE (0.5831 RMSE) across 66 forecast origins. These scores describe distinct evaluation strategies; see [full experiment results](docs/ML_RESULTS.md).
 
-## Selected dataset
+## Quick start
 
-The initial experiment uses the **[UCI Individual Household Electric Power Consumption dataset](https://archive.ics.uci.edu/dataset/235/individualhouseholdelectricpowerconsumption)**.
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt -r backend/requirements.txt
+python scripts/train_models.py
+```
 
-- 2,075,259 one-minute measurements from one household in Sceaux, France.
-- Observation period: December 2006 to November 2010.
-- Primary target: `Global_active_power`, aggregated to hourly means (kW).
-- Dataset DOI: [10.24432/C58K54](https://doi.org/10.24432/C58K54).
-- License: CC BY 4.0; attribution is required.
+The experiment downloads the official UCI archive (pinned SHA-256 checked), validates it, writes ignored local hourly data and quality reports, evaluates the candidates, and saves `artifacts/selected_model.joblib`. Raw data, generated reports, and model files are excluded from Git. To validate a manually obtained source file instead:
 
-This is a historical **single-household** dataset, not live data or a utility-grid dataset. It does not include weather data, so the first version will not claim to be weather-aware. Missing readings must be handled explicitly. See [Dataset guide](docs/DATASET.md).
+```bash
+python scripts/validate_data.py --input data/raw/household_power_consumption.txt
+```
 
-**Attribution:** Hebrail, G. & Berard, A. (2006). *Individual Household Electric Power Consumption* [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C58K54.
+Start the API from any working directory:
 
-## Planned ML workflow
+```bash
+python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
 
-1. Validate timestamps, numeric values, missingness, duplicates and time coverage.
-2. Aggregate minute readings into hourly values with a minimum data-coverage threshold.
-3. Build leakage-safe calendar, lag and rolling-window features.
-4. Evaluate persistence and seasonal-naive baselines.
-5. Compare Linear Regression, Random Forest and HistGradientBoostingRegressor on chronological evaluation windows.
-6. Report MAE and RMSE across multiple 24-hour forecast origins.
-7. Calibrate anomaly thresholds from validation-only residuals and analyse false positives/negatives.
-8. Serve the real forecast and evaluation outputs through an API and dashboard.
+In another terminal:
 
-No performance numbers are pre-claimed. A model will only be described as an improvement if held-out evaluation supports that conclusion.
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Set `NEXT_PUBLIC_API_URL` for the frontend and `GRIDPULSE_CORS_ORIGINS` for the API when they are not running on localhost. API artifact paths can be overridden with `GRIDPULSE_HOURLY_DATA`, `GRIDPULSE_VALIDATION_REPORT`, `GRIDPULSE_MODEL_RESULTS`, and `GRIDPULSE_MODEL_ARTIFACT`.
+
+To run synthetic UI fixtures intentionally, append `?demo=1` to a dashboard URL. The UI labels that mode as synthetic. Without the API and generated artifacts, real-data pages show an unavailable state.
+
+## Verification
+
+```bash
+python -m pytest -q
+python -m compileall -q backend ml scripts examples
+cd frontend
+npm ci
+npm run lint
+npx tsc --noEmit
+npm run build
+```
 
 ## Documentation
 
-- [Product requirements (PRD)](PRD.md)
-- [ML methodology and evaluation plan](ML_PLAN.md)
-- [Dataset selection, setup and validation](docs/DATASET.md)
-- [Initial architecture and API plan](docs/ARCHITECTURE.md)
+- [Product requirements](PRD.md)
+- [ML plan](ML_PLAN.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Dataset and validation](docs/DATASET.md)
+- [Measured ML results](docs/ML_RESULTS.md)
+- [Development and troubleshooting](docs/DEVELOPMENT.md)
+- [Deployment configuration](docs/DEPLOYMENT.md)
+- [Verified implementation status](docs/IMPLEMENTATION_STATUS.md)
 
-## Planned technology stack
-
-| Layer | Planned tools |
-|---|---|
-| Data processing and ML | Python, Pandas, NumPy, scikit-learn |
-| Forecasting candidates | Linear Regression, Random Forest, HistGradientBoostingRegressor |
-| Anomaly detection | Statistical/seasonal residual thresholds; Isolation Forest as an experiment if useful |
-| API | FastAPI, Pydantic, Uvicorn |
-| Frontend | React/Next.js, TypeScript, Tailwind CSS |
-| Charts | Recharts or Plotly (final choice follows UI design) |
-| Testing | pytest, frontend type-check/build checks |
-| Experiment tracking | MLflow, introduced after baseline training is stable |
-| Deployment candidate | Vercel frontend + Render API, after end-to-end verification |
-
-This stack is planned, not yet an implemented or deployed system.
-
-## Quick Start with Real Data
-
-GridPulse now supports automatic download and validation of the UCI dataset:
-
-```bash
-# 1. Create and activate a Python virtual environment
-python -m venv venv
-# Windows:
-venv\Scripts\activate
-# Linux/Mac:
-source venv/bin/activate
-
-# 2. Install dependencies
-python -m pip install -r requirements.txt
-
-# 3. Run the complete real-data integration demo
-python examples/real_data_demo.py
-```
-
-This will:
-- Download the UCI dataset (~20MB) from the official source
-- Validate the raw data and aggregate to hourly means
-- Build leakage-safe features (calendar, lag, rolling)
-- Split chronologically into train/validation/test sets
-- Train baseline and ML models
-- Evaluate on the test set and save results
-
-**Manual validation (alternative):**
-
-If you prefer to download the dataset manually or inspect the validation separately:
-
-1. Download `household_power_consumption.txt` from the [official UCI page](https://archive.ics.uci.edu/dataset/235/individualhouseholdelectricpowerconsumption)
-2. Place it at `data/raw/household_power_consumption.txt`
-3. Run `python scripts/validate_data.py` to validate and aggregate
-4. Check `reports/generated/dataset_validation.json` for quality metrics
-
-**Run tests:**
-
-```bash
-# Run all tests (109 tests covering features, baselines, evaluation, data loading)
-python -m pytest tests/ -v
-
-# Run only data integration tests
-python -m pytest tests/test_data_loader.py -v
-```
-
-Raw data, processed data, and model artifacts are git-ignored and stay local only.
-
-## Scope and limitations
-
-- Historical, single-household analysis; results may not generalise to other properties.
-- No live smart-meter ingestion or automatic control in the MVP.
-- An anomaly means an unusual observed pattern relative to a defined baseline; it does not prove wasted electricity or equipment failure.
-- Forecast performance is not known until the holdout experiments are run.
-- Any empirical uncertainty band will be labelled as such and not presented as guaranteed coverage.
-
-## Project roadmap
-
-- [x] Create repository and initial planning documents.
-- [x] Select a primary public dataset and document its limitations.
-- [x] Document primary dataset and add a chunked validator with tests.
-- [x] Implement Milestone 1A: Leakage-safe feature engineering (calendar, lag, rolling features).
-- [x] Implement Milestone 1B: Baseline models (persistence, seasonal-naive) and evaluation framework.
-- [x] Implement real-data integration: download, validation, and pipeline orchestration.
-- [x] Add comprehensive test coverage (109 tests passing).
-- [ ] Run end-to-end experiments on real UCI data and document actual performance.
-- [ ] Implement validation-calibrated anomaly detection.
-- [ ] Finalise UI/UX design and API contract.
-- [ ] Implement frontend and backend integration.
-- [ ] Add deployment documentation and production readiness checks.
-
-## License
-
-Application source code is released under the repository's MIT License. The UCI dataset is a separate third-party resource under CC BY 4.0 and retains its own attribution and licence requirements.
+Deployment has not been performed. Measured experiment results and run metadata are published in [ML results](docs/ML_RESULTS.md).

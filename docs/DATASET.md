@@ -28,7 +28,7 @@ UCI documents 2,075,259 one-minute measurements collected from one household in 
 
 ## 2. Download and local placement
 
-Download the dataset from the official UCI page and extract the source file locally. Place it at:
+The training command downloads the archive from UCI's official static dataset URL and checks its SHA-256 before reading it. The current pinned digest is recorded in `ml/data_loader.py`; updating it requires verifying a fresh official download and the archive contents. Place a manually downloaded source file at:
 
 ```text
 data/
@@ -60,11 +60,11 @@ The actual file schema must be checked when loading it; code should not silently
 
 ## 4. Data validation checklist
 
-The validation script should produce a summary before training:
+The validator produces a summary before training:
 - file exists, is readable and has the expected columns;
 - row count is reported and compared with UCI's published 2,075,259 records (a difference should produce a warning, not an unexamined silent pass);
 - timestamps parse successfully, sort chronologically and are checked for duplicates;
-- timestamp gaps and non-minute intervals are counted;
+- missing expected minute timestamps, non-minute gaps, and missing hour bins are counted;
 - all numeric columns are parsed, with `?` and empty values represented as missing;
 - missing counts and percentages are reported for each measurement column;
 - negative active-power/sub-metering readings and implausible electrical values are flagged for inspection;
@@ -76,7 +76,7 @@ For hourly means, begin with a configurable coverage threshold of at least 45 va
 
 ## Local validation tooling
 
-The repository includes a chunked validator at `scripts/validate_data.py`. It checks the expected schema, source row count, timestamp parsing/order, duplicate timestamps, numeric missingness and parse failures, active-power range signals, and hourly coverage. It writes:
+The repository includes a chunked validator at `scripts/validate_data.py`. It checks the expected schema, source row count, timestamp parsing/order, duplicate timestamps, missing minute/hour timestamps, numeric missingness and parse failures, suspicious active-power readings, and hourly coverage. It deterministically retains the first source record for a timestamp and excludes later duplicates from hourly aggregation, so duplicate records cannot increase an hour's reading count. It writes:
 
 - `reports/generated/dataset_validation.json` — local data-quality report.
 - `data/processed/hourly_power.csv` — hourly means with at least 45 valid target readings by default.
@@ -89,7 +89,7 @@ python scripts/validate_data.py
 pytest -q tests/test_validate_data.py
 ```
 
-The published row count is used as a warning/check, not as silent proof of integrity. Missing measurements are expected in this dataset and are reported, not imputed. The validator and aggregation tests use a small synthetic fixture; the complete original UCI file must still be scanned locally before model training, and its generated report should be reviewed. Generated data and reports are ignored by Git.
+The published row count is used as a warning/check, not as silent proof of integrity. Missing measurements are expected in this dataset and are reported, not imputed. Generated data and reports are ignored by Git. Run `python scripts/train_models.py` to validate the full raw file and create the experiment/model artifacts.
 
 ## 5. License and attribution
 

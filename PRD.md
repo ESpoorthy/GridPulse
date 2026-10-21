@@ -78,8 +78,8 @@ The MVP is ready for demonstration when a documented dataset can be processed fr
 ## 10. Success measures
 
 We will report, rather than pre-claim, the following:
-- MAE and RMSE versus each simple baseline on the same held-out forecast origins.
-- Results across multiple 24-hour forecast origins, not only a single hand-picked example.
+- Recursive 24-hour MAE and RMSE versus each simple baseline on common validation forecast origins; a distinct held-out recursive score for the selected candidate.
+- Separately labeled one-step test MAE/RMSE and recursive 24-hour evaluation across multiple origins, not one hand-picked example.
 - Data quality counts and number of valid hourly observations.
 - Anomaly review examples showing actual value, expected value, deviation and threshold.
 - Test results, reproducibility instructions and application response health.
